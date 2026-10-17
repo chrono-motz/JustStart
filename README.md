@@ -9,6 +9,7 @@ Just Start is a local-first study and research companion that removes the blank-
 - Deadline, importance, unlock value, and startability influence selection.
 - Partial completion, done, skip, and “worked elsewhere” actions.
 - Sample Compiler Design and Operating Systems study data.
+- Sample question files in `SampleQuestions/` for later quiz generation and import testing.
 - Local browser preview for the sample resource cards.
 
 The current interface is a browser MVP. Laptop auto-start and native file opening are intentionally left as the next integration step; the data model already keeps source paths separate from display content.
