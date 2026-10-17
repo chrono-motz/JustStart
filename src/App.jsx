@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   evaluateCandidates,
   getPrerequisiteStatus,
   selectRecommendedNode,
 } from './domain/selection.js'
 import { loadWorkspace, saveWorkspace } from './domain/persistence.js'
+import { browserResourceUrl, createImportedNode, resourceLabel } from './domain/resources.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -24,6 +25,29 @@ function statusLabel(node) {
   return 'Not started'
 }
 
+function resourceBadge(node) {
+  const kind = node?.resource?.type ?? 'other'
+  const labels = {
+    pdf: 'PDF',
+    document: 'DOC',
+    spreadsheet: 'SHEET',
+    presentation: 'SLIDES',
+    image: 'IMAGE',
+    video: 'VIDEO',
+    audio: 'AUDIO',
+    archive: 'ZIP',
+    code: 'CODE',
+    text: 'TEXT',
+    other: 'FILE',
+  }
+  return labels[kind] ?? 'FILE'
+}
+
+function resourceDescription(node) {
+  if (node?.resource?.type === 'pdf') return 'PDF preview'
+  return `${resourceBadge(node)} resource`
+}
+
 function getBrowserStorage() {
   try {
     return typeof window === 'undefined' ? null : window.localStorage
@@ -35,8 +59,13 @@ function getBrowserStorage() {
 function readStoredWorkspace() {
   const fallback = { nodes: initialNodes, activeProject: 'Compiler Design', autoStart: true }
   const workspace = loadWorkspace(getBrowserStorage(), fallback)
+  const storedNodes = Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes
   return {
-    nodes: Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes,
+    nodes: storedNodes.map((node) => {
+      if (!node?.resource?.temporary || !/^blob:/i.test(node.resource.path ?? '')) return node
+      const { path: _temporaryPath, ...resource } = node.resource
+      return { ...node, resource: { ...resource, unavailable: true } }
+    }),
     activeProject: typeof workspace.activeProject === 'string' ? workspace.activeProject : fallback.activeProject,
     autoStart: typeof workspace.autoStart === 'boolean' ? workspace.autoStart : fallback.autoStart,
   }
@@ -71,6 +100,8 @@ function App() {
   const [catchUpOpen, setCatchUpOpen] = useState(false)
   const [autoStart, setAutoStart] = useState(storedWorkspace.autoStart)
   const [notice, setNotice] = useState('')
+  const fileInputRef = useRef(null)
+  const folderInputRef = useRef(null)
 
   useEffect(() => {
     saveWorkspace(getBrowserStorage(), { nodes, activeProject, autoStart })
@@ -120,13 +151,34 @@ function App() {
   }
 
   function openSource(node) {
-    if (window.justStart?.openResource) {
-      window.justStart.openResource(node.resource.path).then((result) => {
+    const sourcePath = node?.resource?.path
+    const browserUrl = browserResourceUrl(node?.resource)
+    if (!browserUrl && !sourcePath) {
+      showNotice('This resource needs to be added again before it can open.')
+      return
+    }
+    if (window.justStart?.openResource && sourcePath && !/^(?:blob|data):/i.test(sourcePath)) {
+      window.justStart.openResource(sourcePath).then((result) => {
         if (!result?.ok) showNotice(result?.error ?? 'Unable to open this resource.')
       })
       return
     }
-    window.open(node.resource.path, '_blank', 'noopener,noreferrer')
+    const opened = window.open(browserUrl, '_blank', 'noopener,noreferrer')
+    if (!opened) showNotice('The browser blocked the resource window. Allow pop-ups for Just Start.')
+  }
+
+  function addFiles(fileList) {
+    const files = Array.from(fileList ?? [])
+    if (!files.length) return
+    const imported = files.map((file, index) => createImportedNode(file, activeProject, nodes.length + index))
+    setNodes((current) => [...current, ...imported])
+    setScreen('plan')
+    showNotice(`${imported.length} ${imported.length === 1 ? 'resource' : 'resources'} added to ${activeProject}.`)
+  }
+
+  function handleFileInput(event) {
+    addFiles(event.target.files)
+    event.target.value = ''
   }
 
   function toggleAutoStart() {
@@ -204,6 +256,8 @@ function App() {
       </aside>
 
       <main className="main-content">
+        <input ref={fileInputRef} className="hidden-file-input" type="file" multiple accept="*/*" onChange={handleFileInput} />
+        <input ref={folderInputRef} className="hidden-file-input" type="file" multiple accept="*/*" webkitdirectory="" directory="" onChange={handleFileInput} />
         <header className="topbar">
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeProject}</strong></div>
           <div className="topbar-actions"><span className="saved-indicator"><span className="saved-dot" /> Saved locally</span><button className="icon-button" aria-label="Settings" onClick={() => showNotice('Your progress is stored in this browser for now.')}><Icon name="settings" /></button></div>
@@ -213,7 +267,7 @@ function App() {
           <>
             <section className="welcome-row">
               <div><p className="overline">{todayLabel}</p><h1>Good morning, Alex<span className="wave">✦</span></h1><p className="welcome-copy">You do not need to plan the whole day. Just begin with the next useful thing.</p></div>
-              <button className="ghost-button" onClick={() => setCatchUpOpen(true)}><Icon name="plus" /> Log work from elsewhere</button>
+              <div className="welcome-actions"><button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Icon name="plus" /> Add resources</button><button className="ghost-button secondary-ghost" onClick={() => setCatchUpOpen(true)}>Log work elsewhere</button></div>
             </section>
 
             {recommendation ? (
@@ -223,12 +277,12 @@ function App() {
                   <div className="recommendation-eyebrow">{recommendation.eyebrow}</div>
                   <h2>{recommendation.title}</h2>
                   <p className="focus-description">{recommendation.description}</p>
-                  <div className="meta-row"><span><span className="meta-icon">◷</span> {recommendation.estimatedMinutes} min</span><span><span className="meta-icon">◌</span> {recommendation.resource.type === 'pdf' ? 'PDF preview' : 'Resource'}</span><span><span className="meta-icon">↗</span> {recommendation.project}</span></div>
+                  <div className="meta-row"><span><span className="meta-icon">◷</span> {recommendation.estimatedMinutes ?? 10} min</span><span><span className="meta-icon">◌</span> {resourceDescription(recommendation)}</span><span><span className="meta-icon">↗</span> {recommendation.project}</span></div>
                   <div className="question-box"><div className="question-label">Start with a question</div><p>{recommendation.question}</p></div>
                   <div className="focus-actions"><button className="primary-button" onClick={() => setPreviewNode(recommendation)}>Start this <Icon name="arrow" /></button><button className="secondary-button" onClick={() => updateNode(recommendation.id, 'done')}><Icon name="check" /> Mark done</button><button className="icon-action" onClick={() => updateNode(recommendation.id, 'skip')} aria-label="Skip this item"><Icon name="skip" /></button></div>
                 </div>
                 <div className="document-preview" onClick={() => setPreviewNode(recommendation)} role="button" tabIndex="0" onKeyDown={(event) => event.key === 'Enter' && setPreviewNode(recommendation)}>
-                  <div className="preview-toolbar"><span className="preview-file"><span className="pdf-icon">PDF</span> {recommendation.resource.label}</span><span>1 / 14</span></div>
+                  <div className="preview-toolbar"><span className="preview-file"><span className="pdf-icon">{resourceBadge(recommendation)}</span> {resourceLabel(recommendation.resource)}</span><span>Ready to open</span></div>
                   <div className="preview-page"><div className="page-kicker">{recommendation.project}</div><div className="page-title">{recommendation.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div>
                   <div className="preview-caption"><span>Click to open a focused preview</span><Icon name="external" /></div>
                 </div>
@@ -243,7 +297,7 @@ function App() {
             </section>
           </>
         ) : (
-          <PlanScreen nodes={projectNodes} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} />
+          <PlanScreen nodes={projectNodes} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} onAddFiles={() => fileInputRef.current?.click()} onAddFolder={() => folderInputRef.current?.click()} />
         )}
       </main>
 
@@ -260,19 +314,20 @@ function PathRow({ node, nodes, onClick }) {
   return <button className="path-row" onClick={onClick}><span className={node.status === 'done' ? 'row-status done' : isBlocked ? 'row-status blocked' : node.status === 'in_progress' ? 'row-status current' : 'row-status'}>{node.status === 'done' ? <Icon name="check" /> : isBlocked ? <Icon name="lock" /> : ''}</span><span className="row-title"><strong>{node.title}</strong><small>{isBlocked ? gate.blockedReasons[0] : statusLabel(node)}</small></span><span className="row-progress"><span style={{ width: `${progressValue(node)}%` }} /></span><span className="row-arrow">›</span></button>
 }
 
-function PlanScreen({ nodes, onOpen, onBack }) {
+function PlanScreen({ nodes, onOpen, onBack, onAddFiles, onAddFolder }) {
+  const [expandedGroups, setExpandedGroups] = useState({})
   const groups = [...new Set(nodes.map((node) => node.project))]
-  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Your plan</p><h1>Everything has a place.</h1><p className="welcome-copy">The graph stays in the background. Your next action stays in front.</p></div><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div><div className="plan-toolbar"><span>{nodes.length} nodes in this view</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress <span className="legend-dot locked" /> locked</span></div>{groups.map((group) => <div className="plan-group" key={group}><div className="group-title"><span className="project-dot violet" />{group}<span>{nodes.filter((node) => node.project === group && node.status === 'done').length}/{nodes.filter((node) => node.project === group).length}</span></div><div className="plan-grid">{nodes.filter((node) => node.project === group).map((node) => <PlanNode key={node.id} node={node} nodes={nodes} onOpen={onOpen} />)}</div></div>)}</section>
+  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Your plan</p><h1>Everything has a place.</h1><p className="welcome-copy">The graph stays in the background. Your next action stays in front.</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} nodes in this view · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress <span className="legend-dot locked" /> locked</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 8); return <div className="plan-group" key={group}><div className="group-title"><span className="project-dot violet" />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span></div><div className="plan-grid">{visibleNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} onOpen={onOpen} />)}</div>{groupNodes.length > 8 && <button className="show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show fewer' : `Show 8 of ${groupNodes.length} · show more`}</button>}</div>})}</section>
 }
 
 function PlanNode({ node, nodes, onOpen }) {
   const gate = getPrerequisiteStatus(node, nodes)
   const locked = node.status !== 'done' && !gate.satisfied
-  return <button className={locked ? 'plan-node locked' : node.status === 'done' ? 'plan-node done' : 'plan-node'} onClick={() => onOpen(node)}><div className="plan-node-top"><span className="node-index">{node.eyebrow.split('·')[1]?.trim() ?? '•'}</span><span className="node-state">{node.status === 'done' ? 'Done' : locked ? 'Locked' : 'Open'}</span></div><h3>{node.title}</h3><p>{locked ? gate.blockedReasons[0] : node.description}</p><div className="node-footer"><span>{progressValue(node)}%</span><span className="mini-track"><span style={{ width: `${progressValue(node)}%` }} /></span><span>{formatDueDate(node.deadline)}</span></div></button>
+  return <button className={locked ? 'plan-node locked' : node.status === 'done' ? 'plan-node done' : 'plan-node'} onClick={() => onOpen(node)}><div className="plan-node-top"><span className="node-index">{node.eyebrow.split('·')[1]?.trim() ?? '•'}</span><span className="node-state">{node.status === 'done' ? 'Done' : locked ? 'Locked' : 'Open'}</span></div><h3>{node.title}</h3><p>{locked ? gate.blockedReasons[0] : node.description}</p><div className="node-footer"><span>{progressValue(node)}%</span><span className="mini-track"><span style={{ width: `${progressValue(node)}%` }} /></span><span>{node.deadline ? formatDueDate(node.deadline) : resourceDescription(node)}</span></div></button>
 }
 
 function SessionModal({ node, onClose, onOpen, onAction }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="session-modal" role="dialog" aria-modal="true" aria-label={`Start ${node.title}`}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Focus session</span><p className="modal-eyebrow">{node.eyebrow}</p></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><div className="modal-content"><div className="modal-question"><p className="overline">Before you open the source</p><h2>{node.question}</h2><p className="modal-note">Take a guess first. This turns a preview into an active start.</p><div className="answer-line">Write one sentence in your head, then open the resource.</div></div><div className="modal-resource"><div className="resource-header"><span className="pdf-icon">PDF</span><div><strong>{node.resource.label}</strong><span>{node.estimatedMinutes} minute focus · {node.project}</span></div></div><div className="modal-page"><div className="page-kicker">{node.project}</div><div className="page-title">{node.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div><button className="open-source" onClick={onOpen}>Open source <Icon name="external" /></button></div></div><div className="modal-actions"><button className="secondary-button" onClick={() => onAction(node.id, 'partial')}>Partly done</button><button className="primary-button" onClick={() => onAction(node.id, 'done')}>Mark complete <Icon name="check" /></button><button className="modal-skip" onClick={() => onAction(node.id, 'skip')}>Skip for now</button></div></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="session-modal" role="dialog" aria-modal="true" aria-label={`Start ${node.title}`}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Focus session</span><p className="modal-eyebrow">{node.eyebrow}</p></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><div className="modal-content"><div className="modal-question"><p className="overline">Before you open the source</p><h2>{node.question}</h2><p className="modal-note">Take a guess first. This turns a preview into an active start.</p><div className="answer-line">Write one sentence in your head, then open the resource.</div></div><div className="modal-resource"><div className="resource-header"><span className="pdf-icon">{resourceBadge(node)}</span><div><strong>{resourceLabel(node.resource)}</strong><span>{node.estimatedMinutes ?? 10} minute focus · {node.project}</span></div></div><div className="modal-page"><div className="page-kicker">{node.project}</div><div className="page-title">{node.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div><button className="open-source" onClick={onOpen}>Open source <Icon name="external" /></button></div></div><div className="modal-actions"><button className="secondary-button" onClick={() => onAction(node.id, 'partial')}>Partly done</button><button className="primary-button" onClick={() => onAction(node.id, 'done')}>Mark complete <Icon name="check" /></button><button className="modal-skip" onClick={() => onAction(node.id, 'skip')}>Skip for now</button></div></section></div>
 }
 
 function CatchUpModal({ nodes, onClose, onAction }) {

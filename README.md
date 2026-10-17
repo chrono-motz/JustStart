@@ -13,8 +13,11 @@ Just Start is a local-first study and research companion that removes the blank-
 - Local browser preview for the sample resource cards.
 - Local progress persistence through browser storage.
 - Installable browser manifest for a distraction-free standalone window.
+- Add files or whole folders with any file extension; imported resources are automatically classified and added as concise plan nodes.
 
 The browser/PWA MVP remains available, and a small Electron shell now provides native resource opening and login auto-start. The Auto-start switch controls the opening screen in the browser and also updates OS login auto-start when running in Electron.
+
+Use **Add resources** for individual files or **Add folder** in **My plan** for a directory. The picker accepts all file types. Large collections are kept concise: the plan initially shows eight resources per focus area and offers a “show more” control rather than rendering hundreds at once. Imported browser files are available immediately in the current session; their metadata persists, but the browser asks you to add them again after a reload because object URLs are temporary.
 
 ## Requirements
 
