@@ -177,6 +177,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
+  const driveSyncInFlight = useRef(false)
   const driveDeviceId = useMemo(deviceId, [])
   const driveClient = useMemo(
     () => driveToken ? createDriveClient({ accessToken: driveToken }) : null,
@@ -209,8 +210,49 @@ function App() {
         showNotice('Drive sync paused. Your local changes are still safe.')
       }
     }, 900)
-    return () => window.clearTimeout(timer)
+    const poll = window.setInterval(async () => {
+      if (driveSyncInFlight.current || driveBusy) return
+      driveSyncInFlight.current = true
+      try {
+        const remoteFile = await driveClient.getWorkspaceFile()
+        const remoteWorkspace = normaliseSyncedWorkspace(remoteFile?.content, null)
+        if (!remoteWorkspace) return
+        const mergedWorkspace = mergeWorkspaces(
+          syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart),
+          remoteWorkspace,
+        )
+        setNodes(mergedWorkspace.nodes)
+        setFocusAreas(mergedWorkspace.projects)
+        setActiveProject(mergedWorkspace.activeProject || activeProject)
+        setAutoStart(typeof mergedWorkspace.autoStart === 'boolean' ? mergedWorkspace.autoStart : autoStart)
+        await driveClient.putWorkspaceFile(makeSyncEnvelope(mergedWorkspace, driveDeviceId, new Date()), {
+          fileId: remoteFile?.id,
+        })
+        setDriveConnection((current) => ({ ...current, connected: true, lastSyncedAt: new Date().toISOString() }))
+      } catch {
+        // Keep working locally; the next poll or token refresh can recover sync.
+      } finally {
+        driveSyncInFlight.current = false
+      }
+    }, 60_000)
+    return () => {
+      window.clearTimeout(timer)
+      window.clearInterval(poll)
+    }
   }, [activeProject, autoStart, driveBusy, driveClient, driveDeviceId, focusAreas, nodes])
+
+  useEffect(() => {
+    if (!driveToken) return undefined
+    const refresh = window.setTimeout(async () => {
+      try {
+        const { accessToken } = await requestDriveAccess({ clientId: GOOGLE_CLIENT_ID })
+        setDriveToken(accessToken)
+      } catch {
+        showNotice('Drive access expired. Click Reconnect Drive to continue syncing.')
+      }
+    }, 45 * 60 * 1000)
+    return () => window.clearTimeout(refresh)
+  }, [driveToken])
 
   useEffect(() => {
     try {
