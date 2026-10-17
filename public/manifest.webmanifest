@@ -1,7 +1,7 @@
 {
   "name": "Just Start",
   "short_name": "Just Start",
-  "description": "A completion-aware next step for study and research.",
+  "description": "A local-first study and research library for the device you are using.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f6f7fb",

@@ -184,6 +184,7 @@ export const projects = [
   { name: 'All focus areas', color: 'ink' },
   { name: 'Compiler Design', color: 'violet' },
   { name: 'Operating Systems', color: 'blue' },
+  { name: 'Research Library', color: 'blue', mode: 'research' },
 ]
 
 export const formatDueDate = (value) => {

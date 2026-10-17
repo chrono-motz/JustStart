@@ -58,6 +58,16 @@ function getBrowserStorage() {
   }
 }
 
+const THEME_STORAGE_KEY = 'just-start.theme'
+
+function readStoredTheme() {
+  try {
+    return getBrowserStorage()?.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light'
+  } catch {
+    return 'light'
+  }
+}
+
 function readStoredWorkspace() {
   const fallback = {
     nodes: initialNodes,
@@ -67,13 +77,18 @@ function readStoredWorkspace() {
   }
   const workspace = loadWorkspace(getBrowserStorage(), fallback)
   const storedNodes = Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes
+  const storedProjects = Array.isArray(workspace.projects) && workspace.projects.length ? workspace.projects : fallback.projects
+  const researchLibrary = fallback.projects.find((project) => project.name === 'Research Library')
+  const workspaceProjects = storedProjects.some((project) => project.name === 'Research Library')
+    ? storedProjects
+    : [...storedProjects, researchLibrary]
   return {
     nodes: storedNodes.map((node) => {
       if (!node?.resource?.temporary || !/^blob:/i.test(node.resource.path ?? '')) return node
       const { path: _temporaryPath, ...resource } = node.resource
       return { ...node, resource: { ...resource, unavailable: true } }
     }),
-    projects: Array.isArray(workspace.projects) && workspace.projects.length ? workspace.projects : fallback.projects,
+    projects: workspaceProjects,
     activeProject: typeof workspace.activeProject === 'string' ? workspace.activeProject : fallback.activeProject,
     autoStart: typeof workspace.autoStart === 'boolean' ? workspace.autoStart : fallback.autoStart,
   }
@@ -85,6 +100,8 @@ function Icon({ name }) {
     layers: 'M12 3 3 7.5l9 4.5 9-4.5L12 3Zm-9 9 9 4.5 9-4.5M3 16.5l9 4.5 9-4.5',
     graph: 'M5 19V9m0 10h14M5 9l5 5 4-8 5 3',
     settings: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2m0 13v2M4.6 4.6 6 6m12-1.4-1.4 1.4M3 12h2m14 0h2M4.6 19.4 6 18m12 1.4-1.4-1.4',
+    moon: 'M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z',
+    sun: 'M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4m0-12.8L17 7M7 17l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
     arrow: 'M5 12h13m-5-5 5 5-5 5',
     check: 'm5 12 4 4L19 6',
     lock: 'M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v9H6v-9Z',
@@ -101,6 +118,7 @@ function Icon({ name }) {
 
 function App() {
   const [storedWorkspace] = useState(readStoredWorkspace)
+  const [theme, setTheme] = useState(readStoredTheme)
   const [nodes, setNodes] = useState(storedWorkspace.nodes)
   const [focusAreas, setFocusAreas] = useState(storedWorkspace.projects)
   const [activeProject, setActiveProject] = useState(storedWorkspace.activeProject)
@@ -118,6 +136,14 @@ function App() {
   useEffect(() => {
     saveWorkspace(getBrowserStorage(), { nodes, projects: focusAreas, activeProject, autoStart })
   }, [activeProject, autoStart, focusAreas, nodes])
+
+  useEffect(() => {
+    try {
+      getBrowserStorage()?.setItem(THEME_STORAGE_KEY, theme)
+    } catch {
+      // Theme preference remains usable when browser storage is unavailable.
+    }
+  }, [theme])
 
   const allProjects = useMemo(() => [{ name: 'All focus areas', color: 'ink' }, ...focusAreas], [focusAreas])
 
@@ -270,7 +296,6 @@ function App() {
       title,
       eyebrow: `${projectName} · topic`,
       description: description || `A new topic in ${projectName}.`,
-      question: question || `What is the first useful thing to understand about ${title}?`,
       resource: { type: 'other', label: 'Topic' },
       progress: 0,
       status: 'todo',
@@ -329,13 +354,18 @@ function App() {
     setAutoStart(nextValue)
   }
 
+  function toggleTheme() {
+    setTheme((current) => current === 'dark' ? 'light' : 'dark')
+  }
+
   function selectProject(project) {
     setActiveProject(project)
-    setScreen('start')
+    const selectedArea = focusAreas.find((focusArea) => focusArea.name === project)
+    setScreen(selectedArea?.mode === 'research' ? 'plan' : 'start')
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">J</div>
@@ -385,6 +415,9 @@ function App() {
           <button className="nav-item settings-item" onClick={() => showNotice('Settings will keep your local folders and preferences.') }>
             <Icon name="settings" /> <span>Settings</span>
           </button>
+          <button className="nav-item theme-toggle" onClick={toggleTheme} aria-pressed={theme === 'dark'} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} /> <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+          </button>
           <div className="profile-row"><div className="avatar">A</div><div><strong>Alex</strong><span>Local workspace</span></div><span className="more">•••</span></div>
         </div>
       </aside>
@@ -412,7 +445,6 @@ function App() {
                   <h2>{recommendation.title}</h2>
                   <p className="focus-description">{recommendation.description}</p>
                   <div className="meta-row"><span><span className="meta-icon">◷</span> {recommendation.estimatedMinutes ?? 10} min</span><span><span className="meta-icon">◌</span> {resourceDescription(recommendation)}</span><span><span className="meta-icon">↗</span> {recommendation.project}</span></div>
-                  <div className="question-box"><div className="question-label">Start with a question</div><p>{recommendation.question}</p></div>
                   <div className="focus-actions"><button className="primary-button" onClick={() => setPreviewNode(recommendation)}>Start this <Icon name="arrow" /></button><button className="secondary-button" onClick={() => updateNode(recommendation.id, 'done')}><Icon name="check" /> Mark done</button><button className="icon-action" onClick={() => updateNode(recommendation.id, 'skip')} aria-label="Skip this item"><Icon name="skip" /></button></div>
                 </div>
                 <div className="document-preview" onClick={() => setPreviewNode(recommendation)} role="button" tabIndex="0" onKeyDown={(event) => event.key === 'Enter' && setPreviewNode(recommendation)}>
@@ -454,6 +486,9 @@ function PlanScreen({ nodes, area, onOpen, onBack, onAddFiles, onAddFolder, onAd
   const [expandedGroups, setExpandedGroups] = useState({})
   const groups = [...new Set(nodes.map((node) => node.project))]
   const isResearch = area?.mode === 'research'
+  if (isResearch && nodes.length === 0) {
+    return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Research library</p><h1>Read broadly. Connect later.</h1><p className="welcome-copy">Papers are grouped by topic, not locked behind a prerequisite chain.</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>0 papers and research resources · kept concise</span><span className="legend"><span className="legend-dot locked" /> topic shelf</span></div><section className="empty-state"><div className="empty-icon">+</div><h2>Your research library is ready.</h2><p>Add papers or folders from your phone or desktop. Just Start can open files available on the device where you add them; files left only on another laptop need to be moved or added there first.</p><div className="focus-actions"><button className="primary-button" onClick={onAddFiles}><Icon name="plus" /> Add papers</button><button className="secondary-button" onClick={onAddFolder}><Icon name="layers" /> Add a folder</button></div></section></section>
+  }
   return <section className="plan-screen"><div className="plan-header"><div><p className="overline">{isResearch ? 'Research library' : 'Your plan'}</p><h1>{isResearch ? 'Read broadly. Connect later.' : 'Everything has a place.'}</h1><p className="welcome-copy">{isResearch ? 'Papers are grouped by topic, not locked behind a prerequisite chain.' : 'The graph stays in the background. Your next action stays in front.'}</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} {isResearch ? 'papers and research resources' : 'nodes'} · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress {isResearch ? <><span className="legend-dot locked" /> topic shelf</> : <><span className="legend-dot locked" /> locked</>}</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 8); return <div className="plan-group" key={group}><div className="group-title"><span className={`project-dot ${isResearch ? 'blue' : 'violet'}`} />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span><button className="remove-area-button" onClick={() => onRemoveProject(group)}>remove area</button></div><div className={isResearch ? 'plan-grid research-grid' : 'plan-grid'}>{visibleNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} isResearch={isResearch} onOpen={onOpen} onAddChild={onAddChild} onRemove={onRemoveNode} />)}</div>{groupNodes.length > 8 && <button className="show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show fewer' : `Show 8 of ${groupNodes.length} · show more`}</button>}</div>})}</section>
 }
 
@@ -465,7 +500,7 @@ function PlanNode({ node, nodes, isResearch, onOpen, onAddChild, onRemove }) {
 }
 
 function SessionModal({ node, onClose, onOpen, onAction }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="session-modal" role="dialog" aria-modal="true" aria-label={`Start ${node.title}`}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Focus session</span><p className="modal-eyebrow">{node.eyebrow}</p></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><div className="modal-content"><div className="modal-question"><p className="overline">Before you open the source</p><h2>{node.question}</h2><p className="modal-note">Take a guess first. This turns a preview into an active start.</p><div className="answer-line">Write one sentence in your head, then open the resource.</div></div><div className="modal-resource"><div className="resource-header"><span className="pdf-icon">{resourceBadge(node)}</span><div><strong>{resourceLabel(node.resource)}</strong><span>{node.estimatedMinutes ?? 10} minute focus · {node.project}</span></div></div><div className="modal-page"><div className="page-kicker">{node.project}</div><div className="page-title">{node.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div><button className="open-source" onClick={onOpen}>Open source <Icon name="external" /></button></div></div><div className="modal-actions"><button className="secondary-button" onClick={() => onAction(node.id, 'partial')}>Partly done</button><button className="primary-button" onClick={() => onAction(node.id, 'done')}>Mark complete <Icon name="check" /></button><button className="modal-skip" onClick={() => onAction(node.id, 'skip')}>Skip for now</button></div></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="session-modal" role="dialog" aria-modal="true" aria-label={`Start ${node.title}`}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Focus session</span><p className="modal-eyebrow">{node.eyebrow}</p></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><div className="modal-content"><div className="modal-intro"><p className="overline">Ready when you are</p><h2>Make a little progress.</h2><p className="modal-note">Open the source and take the next useful step at your own pace.</p><div className="session-note">A focused start is enough for today.</div></div><div className="modal-resource"><div className="resource-header"><span className="pdf-icon">{resourceBadge(node)}</span><div><strong>{resourceLabel(node.resource)}</strong><span>{node.estimatedMinutes ?? 10} minute focus · {node.project}</span></div></div><div className="modal-page"><div className="page-kicker">{node.project}</div><div className="page-title">{node.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div><button className="open-source" onClick={onOpen}>Open source <Icon name="external" /></button></div></div><div className="modal-actions"><button className="secondary-button" onClick={() => onAction(node.id, 'partial')}>Partly done</button><button className="primary-button" onClick={() => onAction(node.id, 'done')}>Mark complete <Icon name="check" /></button><button className="modal-skip" onClick={() => onAction(node.id, 'skip')}>Skip for now</button></div></section></div>
 }
 
 function ImportModal({ focusAreas, nodes, initialDestination, onClose, onChoose }) {
@@ -504,7 +539,7 @@ function TopicModal({ focusAreas, nodes, activeProject, onClose, onCreate }) {
   function submit(event) {
     event.preventDefault()
     if (!title.trim() || !effectiveProject) return
-    onCreate({ title: title.trim(), project: { name: effectiveProject, color: effectiveMode === 'research' ? 'blue' : 'violet' }, mode: effectiveMode, parentId: effectiveMode === 'research' ? '' : parentId, description: description.trim(), question: question.trim() })
+    onCreate({ title: title.trim(), project: { name: effectiveProject, color: effectiveMode === 'research' ? 'blue' : 'violet' }, mode: effectiveMode, parentId: effectiveMode === 'research' ? '' : parentId, description: description.trim() })
   }
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal topic-modal" role="dialog" aria-modal="true" aria-label="Create a topic" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Shape your path</span><h2>New topic</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Create a topic now, then attach files or questions to it later.</p><label className="select-label" htmlFor="topic-title">Topic name</label><input id="topic-title" className="text-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Probability puzzles" autoFocus /><label className="select-label" htmlFor="topic-project">Focus area</label><select id="topic-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}{focusArea.mode === 'research' ? ' · research' : ''}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <><input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" /><label className="select-label" htmlFor="topic-mode">Area type</label><select id="topic-mode" value={newProjectMode} onChange={(event) => { setNewProjectMode(event.target.value); setParentId('') }}><option value="study">Study plan · prerequisites allowed</option><option value="research">Research library · no prerequisites</option></select></>}{effectiveProject && effectiveMode !== 'research' && parentOptions.length > 0 && <><label className="select-label" htmlFor="topic-parent">Parent topic <span>(optional)</span></label><select id="topic-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · top-level topic</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}{effectiveMode === 'research' && <div className="research-callout">Research topics are broad shelves. Papers in them are never blocked by prerequisites.</div>}<label className="select-label" htmlFor="topic-description">Short note <span>(optional)</span></label><input id="topic-description" className="text-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What will this branch cover?" /><label className="select-label" htmlFor="topic-question">Start question <span>(optional)</span></label><input id="topic-question" className="text-input" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should I understand first?" /><button className="primary-button full-button" type="submit" disabled={!title.trim() || !effectiveProject}>Create topic <Icon name="check" /></button></form></div>

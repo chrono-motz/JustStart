@@ -33,7 +33,7 @@ function sampleResourcesPlugin() {
     } catch {
       return null
     }
-    if (!decoded.startsWith('SampleSlides/') && !decoded.startsWith('SampleQuestions/')) return null
+    if (!decoded.startsWith('SampleSlides/') && !decoded.startsWith('SampleQuestions/') && !decoded.startsWith('SampleResearch/')) return null
     const candidate = path.resolve(projectRoot, decoded)
     const relative = path.relative(projectRoot, candidate)
     return relative.startsWith('..') || path.isAbsolute(relative) ? null : candidate
