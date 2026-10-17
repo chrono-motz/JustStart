@@ -14,7 +14,7 @@ Just Start is a local-first study and research companion that removes the blank-
 - Local progress persistence through browser storage.
 - Installable browser manifest for a distraction-free standalone window.
 
-The current interface is a browser/PWA MVP. The Auto-start switch controls whether the app opens directly on the Start screen or the full plan. OS-level login auto-start and native file opening are intentionally left for the desktop shell integration; the data model already keeps source paths separate from display content.
+The browser/PWA MVP remains available, and a small Electron shell now provides native resource opening and login auto-start. The Auto-start switch controls the opening screen in the browser and also updates OS login auto-start when running in Electron.
 
 ## Requirements
 
@@ -48,6 +48,27 @@ The test command is offline after dependencies have been installed.
 ```bash
 npm run build
 ```
+
+## Desktop shell
+
+Build the renderer and launch the Electron shell against the built `dist/index.html`:
+
+```bash
+npm run build
+npm run desktop
+```
+
+For desktop development, start Vite in one terminal and Electron in another. The shell will load `http://localhost:5173` when `JUST_START_DEV_SERVER=1`:
+
+```bash
+# terminal 1
+npm run dev
+
+# terminal 2
+npm run desktop:dev
+```
+
+The shell keeps renderer JavaScript isolated from Node.js and exposes only `window.justStart.openResource(path)` and `window.justStart.setLoginAutoStart(enabled)`. Resource paths are checked to stay inside the app before Electron opens them with the operating system. On Linux, enabling login auto-start writes a user-level `just-start.desktop` file to `~/.config/autostart/`; Electron's login item API is used where supported.
 
 ## Docker
 

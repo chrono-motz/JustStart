@@ -120,7 +120,28 @@ function App() {
   }
 
   function openSource(node) {
+    if (window.justStart?.openResource) {
+      window.justStart.openResource(node.resource.path).then((result) => {
+        if (!result?.ok) showNotice(result?.error ?? 'Unable to open this resource.')
+      })
+      return
+    }
     window.open(node.resource.path, '_blank', 'noopener,noreferrer')
+  }
+
+  function toggleAutoStart() {
+    const nextValue = !autoStart
+    if (window.justStart?.setLoginAutoStart) {
+      window.justStart.setLoginAutoStart(nextValue).then((result) => {
+        if (!result?.ok) {
+          showNotice(result?.error ?? 'Unable to update auto-start.')
+          return
+        }
+        setAutoStart(nextValue)
+      })
+      return
+    }
+    setAutoStart(nextValue)
   }
 
   function selectProject(project) {
@@ -171,7 +192,7 @@ function App() {
           <div className="auto-start-card">
             <div className="auto-start-heading"><span className="status-dot" /> Auto-start</div>
             <p>Show one useful next step when you open Just Start.</p>
-            <button className={autoStart ? 'toggle on' : 'toggle'} onClick={() => setAutoStart((value) => !value)} aria-label="Toggle auto-start">
+            <button className={autoStart ? 'toggle on' : 'toggle'} onClick={toggleAutoStart} aria-label="Toggle auto-start">
               <span /> {autoStart ? 'On' : 'Off'}
             </button>
           </div>
