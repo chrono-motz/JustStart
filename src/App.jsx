@@ -8,6 +8,9 @@ import { loadWorkspace, saveWorkspace } from './domain/persistence.js'
 import { browserResourceUrl, createImportedNode, resourceLabel } from './domain/resources.js'
 import { parseQuestionPack } from './domain/questionPacks.js'
 import { isResearchResource, researchMetadataFromFile, researchNodeFields } from './domain/research.js'
+import { createDriveClient, DRIVE_APP_FOLDER_NAME } from './domain/drive.js'
+import { requestDriveAccess } from './domain/googleAuth.js'
+import { makeSyncEnvelope, mergeWorkspaces, normaliseSyncedWorkspace } from './domain/sync.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -59,12 +62,50 @@ function getBrowserStorage() {
 }
 
 const THEME_STORAGE_KEY = 'just-start.theme'
+const DRIVE_STATE_STORAGE_KEY = 'just-start.drive'
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 function readStoredTheme() {
   try {
     return getBrowserStorage()?.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light'
   } catch {
     return 'light'
+  }
+}
+
+function readStoredDriveState() {
+  try {
+    const raw = getBrowserStorage()?.getItem(DRIVE_STATE_STORAGE_KEY)
+    const value = raw ? JSON.parse(raw) : null
+    return value && typeof value === 'object' ? value : { connected: false }
+  } catch {
+    return { connected: false }
+  }
+}
+
+function deviceId() {
+  try {
+    const storage = getBrowserStorage()
+    const existing = storage?.getItem('just-start.device')
+    if (existing) return existing
+    const next = globalThis.crypto?.randomUUID?.() || `device-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    storage?.setItem('just-start.device', next)
+    return next
+  } catch {
+    return 'browser-device'
+  }
+}
+
+function syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart) {
+  return {
+    nodes: nodes.map((node) => {
+      if (!node?.resource?.temporary) return node
+      const { path: _temporaryPath, unavailable: _unavailable, ...resource } = node.resource
+      return { ...node, resource }
+    }),
+    projects: focusAreas,
+    activeProject,
+    autoStart,
   }
 }
 
@@ -102,6 +143,7 @@ function Icon({ name }) {
     settings: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2m0 13v2M4.6 4.6 6 6m12-1.4-1.4 1.4M3 12h2m14 0h2M4.6 19.4 6 18m12 1.4-1.4-1.4',
     moon: 'M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z',
     sun: 'M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4m0-12.8L17 7M7 17l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
+    cloud: 'M7.5 18.5h9a4 4 0 0 0 .5-7.97A5.5 5.5 0 0 0 6.4 9.2 4.5 4.5 0 0 0 7.5 18.5Z',
     arrow: 'M5 12h13m-5-5 5 5-5 5',
     check: 'm5 12 4 4L19 6',
     lock: 'M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v9H6v-9Z',
@@ -119,6 +161,9 @@ function Icon({ name }) {
 function App() {
   const [storedWorkspace] = useState(readStoredWorkspace)
   const [theme, setTheme] = useState(readStoredTheme)
+  const [driveConnection, setDriveConnection] = useState(readStoredDriveState)
+  const [driveToken, setDriveToken] = useState('')
+  const [driveBusy, setDriveBusy] = useState(false)
   const [nodes, setNodes] = useState(storedWorkspace.nodes)
   const [focusAreas, setFocusAreas] = useState(storedWorkspace.projects)
   const [activeProject, setActiveProject] = useState(storedWorkspace.activeProject)
@@ -132,10 +177,40 @@ function App() {
   const [notice, setNotice] = useState('')
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
+  const driveDeviceId = useMemo(deviceId, [])
+  const driveClient = useMemo(
+    () => driveToken ? createDriveClient({ accessToken: driveToken }) : null,
+    [driveToken],
+  )
 
   useEffect(() => {
     saveWorkspace(getBrowserStorage(), { nodes, projects: focusAreas, activeProject, autoStart })
   }, [activeProject, autoStart, focusAreas, nodes])
+
+  useEffect(() => {
+    try {
+      getBrowserStorage()?.setItem(DRIVE_STATE_STORAGE_KEY, JSON.stringify(driveConnection))
+    } catch {
+      // Drive connection metadata is only a convenience; OAuth remains the source of access.
+    }
+  }, [driveConnection])
+
+  useEffect(() => {
+    if (!driveClient || driveBusy) return undefined
+    const timer = window.setTimeout(async () => {
+      try {
+        await driveClient.putWorkspaceFile(makeSyncEnvelope(
+          syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart),
+          driveDeviceId,
+          new Date(),
+        ))
+        setDriveConnection((current) => ({ ...current, connected: true, lastSyncedAt: new Date().toISOString() }))
+      } catch {
+        showNotice('Drive sync paused. Your local changes are still safe.')
+      }
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [activeProject, autoStart, driveBusy, driveClient, driveDeviceId, focusAreas, nodes])
 
   useEffect(() => {
     try {
@@ -198,6 +273,16 @@ function App() {
   function openSource(node) {
     const sourcePath = node?.resource?.path
     const browserUrl = browserResourceUrl(node?.resource)
+    const driveFileId = node?.resource?.driveFileId
+    if (driveFileId && !browserUrl && !sourcePath) {
+      if (!driveClient) {
+        showNotice('Connect Google Drive to open this file on this device.')
+        return
+      }
+      const opened = window.open(driveClient.webViewUrl(driveFileId), '_blank', 'noopener,noreferrer')
+      if (!opened) showNotice('The browser blocked the Drive file window. Allow pop-ups for Just Start.')
+      return
+    }
     if (!browserUrl && !sourcePath) {
       showNotice('This resource needs to be added again before it can open.')
       return
@@ -212,48 +297,110 @@ function App() {
     if (!opened) showNotice('The browser blocked the resource window. Allow pop-ups for Just Start.')
   }
 
+  async function connectGoogleDrive() {
+    if (driveBusy) return
+    setDriveBusy(true)
+    try {
+      const { accessToken } = await requestDriveAccess({ clientId: GOOGLE_CLIENT_ID })
+      const client = createDriveClient({ accessToken })
+      const remoteFile = await client.getWorkspaceFile()
+      const localWorkspace = syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart)
+      const remoteWorkspace = remoteFile ? normaliseSyncedWorkspace(remoteFile.content, null) : null
+      const mergedWorkspace = remoteWorkspace
+        ? mergeWorkspaces(localWorkspace, remoteWorkspace)
+        : localWorkspace
+      const written = await client.putWorkspaceFile(
+        makeSyncEnvelope(mergedWorkspace, driveDeviceId, new Date()),
+        remoteFile?.id ? { fileId: remoteFile.id } : {},
+      )
+      setNodes(Array.isArray(mergedWorkspace.nodes) ? mergedWorkspace.nodes : nodes)
+      setFocusAreas(Array.isArray(mergedWorkspace.projects) ? mergedWorkspace.projects : focusAreas)
+      setActiveProject(mergedWorkspace.activeProject || activeProject)
+      setAutoStart(typeof mergedWorkspace.autoStart === 'boolean' ? mergedWorkspace.autoStart : autoStart)
+      setDriveToken(accessToken)
+      setDriveConnection({
+        connected: true,
+        folderId: written?.parents?.[0] || remoteFile?.parents?.[0],
+        workspaceFileId: written?.id || remoteFile?.id,
+        lastSyncedAt: new Date().toISOString(),
+      })
+      showNotice(`Google Drive connected. ${remoteWorkspace ? 'Workspace merged.' : `${DRIVE_APP_FOLDER_NAME} folder created.`}`)
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : 'Google Drive connection failed.')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
+
+  function disconnectGoogleDrive() {
+    setDriveToken('')
+    setDriveConnection({ connected: false })
+    showNotice('Google Drive disconnected on this device. Local work remains available.')
+  }
+
   async function addFiles(fileList, destination) {
     const files = Array.from(fileList ?? [])
     if (!files.length) return
+    const uploading = Boolean(driveClient)
+    if (uploading) setDriveBusy(true)
     const projectName = destination?.project || (activeProject === 'All focus areas' ? 'Imported resources' : activeProject)
     const projectMode = destination?.projectMode || focusAreas.find((focusArea) => focusArea.name === projectName)?.mode || 'study'
     const imported = []
-    for (const [index, file] of files.entries()) {
-      const node = createImportedNode(file, projectName, nodes.length + index)
-      const shouldTreatAsResearch = projectMode === 'research' && isResearchResource(file)
-      if (shouldTreatAsResearch) {
-        const metadata = researchMetadataFromFile(file)
-        Object.assign(node, researchNodeFields(metadata, projectName))
-        node.title = metadata.title
-        node.eyebrow = `${projectName} · paper`
-        node.description = [
-          metadata.authors.length ? metadata.authors.join(', ') : 'Author not inferred',
-          metadata.year ?? 'Year unknown',
-          metadata.doi ? `DOI ${metadata.doi}` : null,
-        ].filter(Boolean).join(' · ')
-        node.question = `What is the central question or contribution of “${metadata.title}”?`
-      } else if (destination?.parentId && projectMode !== 'research') {
-        node.parents = [destination.parentId]
-        node.progressThreshold = 0.65
-      }
-      const fileName = String(file.name ?? '').toLowerCase()
-      const mayBeQuestionPack = /\.(?:json|md|markdown)$/.test(fileName)
-      if (mayBeQuestionPack && typeof file.text === 'function') {
-        try {
-          const text = await file.text()
-          const pack = parseQuestionPack(text, file.name)
-          if (pack) {
-            node.title = pack.title
-            node.description = `${pack.questions.length} questions${pack.subject ? ` · ${pack.subject}` : ''}. Optional answers and solutions are kept with the pack.`
-            node.question = pack.questions[0].prompt
-            node.questionPack = pack
-            node.resource.type = 'text'
-          }
-        } catch {
-          // The file is still a normal resource when its contents cannot be read.
+    try {
+      for (const [index, file] of files.entries()) {
+        const node = createImportedNode(file, projectName, nodes.length + index)
+        const shouldTreatAsResearch = projectMode === 'research' && isResearchResource(file)
+        if (shouldTreatAsResearch) {
+          const metadata = researchMetadataFromFile(file)
+          Object.assign(node, researchNodeFields(metadata, projectName))
+          node.title = metadata.title
+          node.eyebrow = `${projectName} · paper`
+          node.description = [
+            metadata.authors.length ? metadata.authors.join(', ') : 'Author not inferred',
+            metadata.year ?? 'Year unknown',
+            metadata.doi ? `DOI ${metadata.doi}` : null,
+          ].filter(Boolean).join(' · ')
+        } else if (destination?.parentId && projectMode !== 'research') {
+          node.parents = [destination.parentId]
+          node.progressThreshold = 0.65
         }
+        const fileName = String(file.name ?? '').toLowerCase()
+        const mayBeQuestionPack = /\.(?:json|md|markdown)$/.test(fileName)
+        if (mayBeQuestionPack && typeof file.text === 'function') {
+          try {
+            const text = await file.text()
+            const pack = parseQuestionPack(text, file.name)
+            if (pack) {
+              node.title = pack.title
+              node.description = `${pack.questions.length} questions${pack.subject ? ` · ${pack.subject}` : ''}. Optional answers and solutions are kept with the pack.`
+              node.questionPack = pack
+              node.resource.type = 'text'
+            }
+          } catch {
+            // The file is still a normal resource when its contents cannot be read.
+          }
+        }
+        if (driveClient) {
+          try {
+            const uploaded = await driveClient.uploadFile({
+              name: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              content: file,
+            })
+            node.resource = {
+              ...node.resource,
+              driveFileId: uploaded.id,
+              driveWebViewUrl: driveClient.webViewUrl(uploaded.id),
+              source: 'google-drive',
+            }
+          } catch {
+            showNotice(`${file.name} stayed local because Drive upload failed.`)
+          }
+        }
+        imported.push(node)
       }
-      imported.push(node)
+    } finally {
+      if (uploading) setDriveBusy(false)
     }
     if (projectName !== 'Imported resources' && !focusAreas.some((project) => project.name === projectName)) {
       setFocusAreas((current) => [...current, { name: projectName, color: projectMode === 'research' ? 'blue' : 'violet', mode: projectMode }])
@@ -417,6 +564,9 @@ function App() {
           </button>
           <button className="nav-item theme-toggle" onClick={toggleTheme} aria-pressed={theme === 'dark'} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} /> <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+          </button>
+          <button className="nav-item drive-toggle" onClick={driveToken ? disconnectGoogleDrive : connectGoogleDrive} disabled={driveBusy} aria-label={driveToken ? 'Disconnect Google Drive' : 'Connect Google Drive'}>
+            <Icon name="cloud" /> <span>{driveBusy ? 'Connecting…' : driveToken ? 'Drive synced' : driveConnection.connected ? 'Reconnect Drive' : 'Connect Google Drive'}</span>
           </button>
           <div className="profile-row"><div className="avatar">A</div><div><strong>Alex</strong><span>Local workspace</span></div><span className="more">•••</span></div>
         </div>
