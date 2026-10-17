@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   evaluateCandidates,
   getPrerequisiteStatus,
   selectRecommendedNode,
 } from './domain/selection.js'
+import { loadWorkspace, saveWorkspace } from './domain/persistence.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -21,6 +22,24 @@ function statusLabel(node) {
   if (node.status === 'skipped') return 'Skipped'
   if ((node.progress ?? 0) > 0) return `${progressValue(node)}% in progress`
   return 'Not started'
+}
+
+function getBrowserStorage() {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function readStoredWorkspace() {
+  const fallback = { nodes: initialNodes, activeProject: 'Compiler Design', autoStart: true }
+  const workspace = loadWorkspace(getBrowserStorage(), fallback)
+  return {
+    nodes: Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes,
+    activeProject: typeof workspace.activeProject === 'string' ? workspace.activeProject : fallback.activeProject,
+    autoStart: typeof workspace.autoStart === 'boolean' ? workspace.autoStart : fallback.autoStart,
+  }
 }
 
 function Icon({ name }) {
@@ -44,13 +63,18 @@ function Icon({ name }) {
 }
 
 function App() {
-  const [nodes, setNodes] = useState(initialNodes)
-  const [activeProject, setActiveProject] = useState('Compiler Design')
-  const [screen, setScreen] = useState('start')
+  const [storedWorkspace] = useState(readStoredWorkspace)
+  const [nodes, setNodes] = useState(storedWorkspace.nodes)
+  const [activeProject, setActiveProject] = useState(storedWorkspace.activeProject)
+  const [screen, setScreen] = useState(storedWorkspace.autoStart ? 'start' : 'plan')
   const [previewNode, setPreviewNode] = useState(null)
   const [catchUpOpen, setCatchUpOpen] = useState(false)
-  const [autoStart, setAutoStart] = useState(true)
+  const [autoStart, setAutoStart] = useState(storedWorkspace.autoStart)
   const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    saveWorkspace(getBrowserStorage(), { nodes, activeProject, autoStart })
+  }, [activeProject, autoStart, nodes])
 
   const projectNodes = useMemo(
     () => nodes.filter((node) => activeProject === 'All focus areas' || node.project === activeProject),

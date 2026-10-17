@@ -11,8 +11,10 @@ Just Start is a local-first study and research companion that removes the blank-
 - Sample Compiler Design and Operating Systems study data.
 - Sample question files in `SampleQuestions/` for later quiz generation and import testing.
 - Local browser preview for the sample resource cards.
+- Local progress persistence through browser storage.
+- Installable browser manifest for a distraction-free standalone window.
 
-The current interface is a browser MVP. Laptop auto-start and native file opening are intentionally left as the next integration step; the data model already keeps source paths separate from display content.
+The current interface is a browser/PWA MVP. The Auto-start switch controls whether the app opens directly on the Start screen or the full plan. OS-level login auto-start and native file opening are intentionally left for the desktop shell integration; the data model already keeps source paths separate from display content.
 
 ## Requirements
 
