@@ -7,6 +7,7 @@ import {
 import { loadWorkspace, saveWorkspace } from './domain/persistence.js'
 import { browserResourceUrl, createImportedNode, resourceLabel } from './domain/resources.js'
 import { parseQuestionPack } from './domain/questionPacks.js'
+import { isResearchResource, researchMetadataFromFile, researchNodeFields } from './domain/research.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -120,6 +121,11 @@ function App() {
 
   const allProjects = useMemo(() => [{ name: 'All focus areas', color: 'ink' }, ...focusAreas], [focusAreas])
 
+  const activeArea = useMemo(
+    () => focusAreas.find((focusArea) => focusArea.name === activeProject) ?? { name: activeProject, mode: 'study' },
+    [activeProject, focusAreas],
+  )
+
   const projectNodes = useMemo(
     () => nodes.filter((node) => activeProject === 'All focus areas' || node.project === activeProject),
     [activeProject, nodes],
@@ -184,10 +190,23 @@ function App() {
     const files = Array.from(fileList ?? [])
     if (!files.length) return
     const projectName = destination?.project || (activeProject === 'All focus areas' ? 'Imported resources' : activeProject)
+    const projectMode = destination?.projectMode || focusAreas.find((focusArea) => focusArea.name === projectName)?.mode || 'study'
     const imported = []
     for (const [index, file] of files.entries()) {
       const node = createImportedNode(file, projectName, nodes.length + index)
-      if (destination?.parentId) {
+      const shouldTreatAsResearch = projectMode === 'research' && isResearchResource(file)
+      if (shouldTreatAsResearch) {
+        const metadata = researchMetadataFromFile(file)
+        Object.assign(node, researchNodeFields(metadata, projectName))
+        node.title = metadata.title
+        node.eyebrow = `${projectName} · paper`
+        node.description = [
+          metadata.authors.length ? metadata.authors.join(', ') : 'Author not inferred',
+          metadata.year ?? 'Year unknown',
+          metadata.doi ? `DOI ${metadata.doi}` : null,
+        ].filter(Boolean).join(' · ')
+        node.question = `What is the central question or contribution of “${metadata.title}”?`
+      } else if (destination?.parentId && projectMode !== 'research') {
         node.parents = [destination.parentId]
         node.progressThreshold = 0.65
       }
@@ -211,7 +230,7 @@ function App() {
       imported.push(node)
     }
     if (projectName !== 'Imported resources' && !focusAreas.some((project) => project.name === projectName)) {
-      setFocusAreas((current) => [...current, { name: projectName, color: 'violet' }])
+      setFocusAreas((current) => [...current, { name: projectName, color: projectMode === 'research' ? 'blue' : 'violet', mode: projectMode }])
     }
     setNodes((current) => [...current, ...imported])
     setActiveProject(projectName)
@@ -228,6 +247,7 @@ function App() {
     setImportDestination({
       project: destination.project ?? (activeProject === 'All focus areas' ? '' : activeProject),
       parentId: destination.parentId ?? '',
+      projectMode: destination.projectMode ?? focusAreas.find((focusArea) => focusArea.name === (destination.project ?? activeProject))?.mode ?? 'study',
     })
     setImportModalOpen(true)
   }
@@ -241,11 +261,12 @@ function App() {
     }, 0)
   }
 
-  function createTopic({ title, project, parentId, description, question }) {
+  function createTopic({ title, project, parentId, description, question, mode }) {
     const projectName = project.name
     const node = {
       id: `topic-${Date.now()}`,
       project: projectName,
+      kind: mode === 'research' ? 'research-topic' : 'topic',
       title,
       eyebrow: `${projectName} · topic`,
       description: description || `A new topic in ${projectName}.`,
@@ -258,12 +279,12 @@ function App() {
       startability: 0.75,
       estimatedMinutes: 15,
     }
-    if (parentId) {
+    if (parentId && mode !== 'research') {
       node.parents = [parentId]
       node.progressThreshold = 0.65
     }
     if (!focusAreas.some((focusArea) => focusArea.name === projectName)) {
-      setFocusAreas((current) => [...current, project])
+      setFocusAreas((current) => [...current, { ...project, mode }])
     }
     setNodes((current) => [...current, node])
     setActiveProject(projectName)
@@ -410,7 +431,7 @@ function App() {
             </section>
           </>
         ) : (
-          <PlanScreen nodes={projectNodes} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} onAddFiles={() => openImportModal()} onAddFolder={() => openImportModal({ mode: 'folder' })} onAddTopic={() => setTopicModalOpen(true)} onAddChild={(node) => openImportModal({ project: node.project, parentId: node.id })} onRemoveNode={removeNode} onRemoveProject={removeFocusArea} />
+          <PlanScreen nodes={projectNodes} area={activeArea} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} onAddFiles={() => openImportModal()} onAddFolder={() => openImportModal({ mode: 'folder' })} onAddTopic={() => setTopicModalOpen(true)} onAddChild={(node) => openImportModal({ project: node.project, parentId: node.id })} onRemoveNode={removeNode} onRemoveProject={removeFocusArea} />
         )}
       </main>
 
@@ -429,16 +450,18 @@ function PathRow({ node, nodes, onClick }) {
   return <button className="path-row" onClick={onClick}><span className={node.status === 'done' ? 'row-status done' : isBlocked ? 'row-status blocked' : node.status === 'in_progress' ? 'row-status current' : 'row-status'}>{node.status === 'done' ? <Icon name="check" /> : isBlocked ? <Icon name="lock" /> : ''}</span><span className="row-title"><strong>{node.title}</strong><small>{isBlocked ? gate.blockedReasons[0] : statusLabel(node)}</small></span><span className="row-progress"><span style={{ width: `${progressValue(node)}%` }} /></span><span className="row-arrow">›</span></button>
 }
 
-function PlanScreen({ nodes, onOpen, onBack, onAddFiles, onAddFolder, onAddTopic, onAddChild, onRemoveNode, onRemoveProject }) {
+function PlanScreen({ nodes, area, onOpen, onBack, onAddFiles, onAddFolder, onAddTopic, onAddChild, onRemoveNode, onRemoveProject }) {
   const [expandedGroups, setExpandedGroups] = useState({})
   const groups = [...new Set(nodes.map((node) => node.project))]
-  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Your plan</p><h1>Everything has a place.</h1><p className="welcome-copy">The graph stays in the background. Your next action stays in front.</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} nodes in this view · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress <span className="legend-dot locked" /> locked</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 8); return <div className="plan-group" key={group}><div className="group-title"><span className="project-dot violet" />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span><button className="remove-area-button" onClick={() => onRemoveProject(group)}>remove area</button></div><div className="plan-grid">{visibleNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} onOpen={onOpen} onAddChild={onAddChild} onRemove={onRemoveNode} />)}</div>{groupNodes.length > 8 && <button className="show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show fewer' : `Show 8 of ${groupNodes.length} · show more`}</button>}</div>})}</section>
+  const isResearch = area?.mode === 'research'
+  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">{isResearch ? 'Research library' : 'Your plan'}</p><h1>{isResearch ? 'Read broadly. Connect later.' : 'Everything has a place.'}</h1><p className="welcome-copy">{isResearch ? 'Papers are grouped by topic, not locked behind a prerequisite chain.' : 'The graph stays in the background. Your next action stays in front.'}</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} {isResearch ? 'papers and research resources' : 'nodes'} · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress {isResearch ? <><span className="legend-dot locked" /> topic shelf</> : <><span className="legend-dot locked" /> locked</>}</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 8); return <div className="plan-group" key={group}><div className="group-title"><span className={`project-dot ${isResearch ? 'blue' : 'violet'}`} />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span><button className="remove-area-button" onClick={() => onRemoveProject(group)}>remove area</button></div><div className={isResearch ? 'plan-grid research-grid' : 'plan-grid'}>{visibleNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} isResearch={isResearch} onOpen={onOpen} onAddChild={onAddChild} onRemove={onRemoveNode} />)}</div>{groupNodes.length > 8 && <button className="show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show fewer' : `Show 8 of ${groupNodes.length} · show more`}</button>}</div>})}</section>
 }
 
-function PlanNode({ node, nodes, onOpen, onAddChild, onRemove }) {
+function PlanNode({ node, nodes, isResearch, onOpen, onAddChild, onRemove }) {
   const gate = getPrerequisiteStatus(node, nodes)
-  const locked = node.status !== 'done' && !gate.satisfied
-  return <div className={locked ? 'plan-node locked' : node.status === 'done' ? 'plan-node done' : 'plan-node'}><button className="plan-node-main" onClick={() => onOpen(node)}><div className="plan-node-top"><span className="node-index">{node.eyebrow.split('·')[1]?.trim() ?? '•'}</span><span className="node-state">{node.status === 'done' ? 'Done' : locked ? 'Locked' : 'Open'}</span></div><h3>{node.title}</h3><p>{locked ? gate.blockedReasons[0] : node.description}</p></button><div className="node-footer"><span>{progressValue(node)}%</span><span className="mini-track"><span style={{ width: `${progressValue(node)}%` }} /></span><span>{node.deadline ? formatDueDate(node.deadline) : resourceDescription(node)}</span><button className="add-child-button" onClick={() => onAddChild(node)} title={`Add a child to ${node.title}`}><Icon name="plus" /> child</button><button className="remove-node-button" onClick={() => onRemove(node.id)} title={`Remove ${node.title}`} aria-label={`Remove ${node.title}`}>×</button></div></div>
+  const locked = !isResearch && node.status !== 'done' && !gate.satisfied
+  const researchLine = node.research ? [node.research.authors?.join(', '), node.research.year, node.research.doi].filter(Boolean).join(' · ') : null
+  return <div className={locked ? 'plan-node locked' : node.status === 'done' ? 'plan-node done' : isResearch ? 'plan-node research-node' : 'plan-node'}><button className="plan-node-main" onClick={() => onOpen(node)}><div className="plan-node-top"><span className="node-index">{node.eyebrow.split('·')[1]?.trim() ?? '•'}</span><span className="node-state">{node.status === 'done' ? 'Done' : locked ? 'Locked' : isResearch ? 'Paper' : 'Open'}</span></div><h3>{node.title}</h3><p>{locked ? gate.blockedReasons[0] : researchLine || node.description}</p></button><div className="node-footer"><span>{progressValue(node)}%</span><span className="mini-track"><span style={{ width: `${progressValue(node)}%` }} /></span><span>{node.deadline ? formatDueDate(node.deadline) : resourceDescription(node)}</span>{!isResearch && <button className="add-child-button" onClick={() => onAddChild(node)} title={`Add a child to ${node.title}`}><Icon name="plus" /> child</button>}<button className="remove-node-button" onClick={() => onRemove(node.id)} title={`Remove ${node.title}`} aria-label={`Remove ${node.title}`}>×</button></div></div>
 }
 
 function SessionModal({ node, onClose, onOpen, onAction }) {
@@ -450,15 +473,18 @@ function ImportModal({ focusAreas, nodes, initialDestination, onClose, onChoose 
   const [projectChoice, setProjectChoice] = useState(firstProject)
   const [newProjectName, setNewProjectName] = useState('')
   const [parentId, setParentId] = useState(initialDestination.parentId || '')
+  const [newProjectMode, setNewProjectMode] = useState('study')
   const effectiveProject = projectChoice === '__new__' ? newProjectName.trim() : projectChoice
+  const existingProject = focusAreas.find((focusArea) => focusArea.name === effectiveProject)
+  const effectiveMode = projectChoice === '__new__' ? newProjectMode : existingProject?.mode || initialDestination.projectMode || 'study'
   const parentOptions = nodes.filter((node) => node.project === effectiveProject)
 
   function choose(mode) {
     if (!effectiveProject) return
-    onChoose({ project: effectiveProject, parentId, mode })
+    onChoose({ project: effectiveProject, parentId: effectiveMode === 'research' ? '' : parentId, projectMode: effectiveMode, mode })
   }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="small-modal" role="dialog" aria-modal="true" aria-label="Add resources"><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Add to your plan</span><h2>Where should these go?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Pick a focus area and optionally make the new resources children of an existing topic.</p><label className="select-label" htmlFor="import-project">Focus area</label><select id="import-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" autoFocus />}{effectiveProject && parentOptions.length > 0 && <><label className="select-label" htmlFor="import-parent">Parent topic <span>(optional)</span></label><select id="import-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · start a new branch</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}<div className="import-actions"><button className="primary-button" onClick={() => choose('files')} disabled={!effectiveProject}>Choose files <Icon name="plus" /></button><button className="secondary-button" onClick={() => choose('folder')} disabled={!effectiveProject}>Choose folder</button></div><p className="form-hint">Any extension is accepted. A question-pack JSON or Markdown file becomes one concise question collection.</p></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="small-modal" role="dialog" aria-modal="true" aria-label="Add resources"><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Add to your plan</span><h2>Where should these go?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Pick a focus area. Study resources can attach to a parent; research papers stay as a broad, ungated topic shelf.</p><label className="select-label" htmlFor="import-project">Focus area</label><select id="import-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}{focusArea.mode === 'research' ? ' · research' : ''}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <><input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" autoFocus /><label className="select-label" htmlFor="import-mode">Area type</label><select id="import-mode" value={newProjectMode} onChange={(event) => { setNewProjectMode(event.target.value); setParentId('') }}><option value="study">Study plan · prerequisites allowed</option><option value="research">Research library · no prerequisites</option></select></>}{effectiveProject && effectiveMode !== 'research' && parentOptions.length > 0 && <><label className="select-label" htmlFor="import-parent">Parent topic <span>(optional)</span></label><select id="import-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · start a new branch</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}{effectiveMode === 'research' && <div className="research-callout">Research mode: PDFs and citation files are grouped here without directed prerequisite gates.</div>}<div className="import-actions"><button className="primary-button" onClick={() => choose('files')} disabled={!effectiveProject}>Choose files <Icon name="plus" /></button><button className="secondary-button" onClick={() => choose('folder')} disabled={!effectiveProject}>Choose folder</button></div><p className="form-hint">Any extension is accepted. A JSON or Markdown question pack becomes one concise question collection.</p></section></div>
 }
 
 function TopicModal({ focusAreas, nodes, activeProject, onClose, onCreate }) {
@@ -466,19 +492,22 @@ function TopicModal({ focusAreas, nodes, activeProject, onClose, onCreate }) {
   const [title, setTitle] = useState('')
   const [projectChoice, setProjectChoice] = useState(initialProject)
   const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectMode, setNewProjectMode] = useState('study')
   const [description, setDescription] = useState('')
   const [question, setQuestion] = useState('')
   const [parentId, setParentId] = useState('')
   const effectiveProject = projectChoice === '__new__' ? newProjectName.trim() : projectChoice
+  const existingProject = focusAreas.find((focusArea) => focusArea.name === effectiveProject)
+  const effectiveMode = projectChoice === '__new__' ? newProjectMode : existingProject?.mode || 'study'
   const parentOptions = nodes.filter((node) => node.project === effectiveProject)
 
   function submit(event) {
     event.preventDefault()
     if (!title.trim() || !effectiveProject) return
-    onCreate({ title: title.trim(), project: { name: effectiveProject, color: 'violet' }, parentId, description: description.trim(), question: question.trim() })
+    onCreate({ title: title.trim(), project: { name: effectiveProject, color: effectiveMode === 'research' ? 'blue' : 'violet' }, mode: effectiveMode, parentId: effectiveMode === 'research' ? '' : parentId, description: description.trim(), question: question.trim() })
   }
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal topic-modal" role="dialog" aria-modal="true" aria-label="Create a topic" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Shape your path</span><h2>New topic</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Create a topic now, then attach files or questions to it later.</p><label className="select-label" htmlFor="topic-title">Topic name</label><input id="topic-title" className="text-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Probability puzzles" autoFocus /><label className="select-label" htmlFor="topic-project">Focus area</label><select id="topic-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" />}{effectiveProject && parentOptions.length > 0 && <><label className="select-label" htmlFor="topic-parent">Parent topic <span>(optional)</span></label><select id="topic-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · top-level topic</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}<label className="select-label" htmlFor="topic-description">Short note <span>(optional)</span></label><input id="topic-description" className="text-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What will this branch cover?" /><label className="select-label" htmlFor="topic-question">Start question <span>(optional)</span></label><input id="topic-question" className="text-input" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should I understand first?" /><button className="primary-button full-button" type="submit" disabled={!title.trim() || !effectiveProject}>Create topic <Icon name="check" /></button></form></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal topic-modal" role="dialog" aria-modal="true" aria-label="Create a topic" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Shape your path</span><h2>New topic</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Create a topic now, then attach files or questions to it later.</p><label className="select-label" htmlFor="topic-title">Topic name</label><input id="topic-title" className="text-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Probability puzzles" autoFocus /><label className="select-label" htmlFor="topic-project">Focus area</label><select id="topic-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}{focusArea.mode === 'research' ? ' · research' : ''}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <><input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" /><label className="select-label" htmlFor="topic-mode">Area type</label><select id="topic-mode" value={newProjectMode} onChange={(event) => { setNewProjectMode(event.target.value); setParentId('') }}><option value="study">Study plan · prerequisites allowed</option><option value="research">Research library · no prerequisites</option></select></>}{effectiveProject && effectiveMode !== 'research' && parentOptions.length > 0 && <><label className="select-label" htmlFor="topic-parent">Parent topic <span>(optional)</span></label><select id="topic-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · top-level topic</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}{effectiveMode === 'research' && <div className="research-callout">Research topics are broad shelves. Papers in them are never blocked by prerequisites.</div>}<label className="select-label" htmlFor="topic-description">Short note <span>(optional)</span></label><input id="topic-description" className="text-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What will this branch cover?" /><label className="select-label" htmlFor="topic-question">Start question <span>(optional)</span></label><input id="topic-question" className="text-input" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should I understand first?" /><button className="primary-button full-button" type="submit" disabled={!title.trim() || !effectiveProject}>Create topic <Icon name="check" /></button></form></div>
 }
 
 function CatchUpModal({ nodes, onClose, onAction }) {

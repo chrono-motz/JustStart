@@ -58,7 +58,7 @@ function sampleResourcesPlugin() {
       })
     },
     async generateBundle() {
-      const resourceDirectories = ['SampleSlides', 'SampleQuestions']
+      const resourceDirectories = ['SampleSlides', 'SampleQuestions', 'SampleResearch']
       for (const directory of resourceDirectories) {
         const root = path.join(projectRoot, directory)
         let files = []
