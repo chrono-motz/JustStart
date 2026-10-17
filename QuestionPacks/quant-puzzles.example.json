@@ -1,0 +1,18 @@
+{
+  "title": "Quant Puzzles",
+  "subject": "Quantitative Aptitude",
+  "questions": [
+    {
+      "id": "prob-001",
+      "prompt": "A fair coin is tossed three times. What is the probability of exactly two heads?",
+      "answer": "3/8",
+      "solution": "There are 3 equally likely positions for the single tail among 2^3 outcomes, so the probability is 3/8.",
+      "tags": ["probability", "counting"]
+    },
+    {
+      "id": "prob-002",
+      "prompt": "Two dice are rolled. What is the probability that their sum is 8?",
+      "tags": ["probability"]
+    }
+  ]
+}

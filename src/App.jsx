@@ -6,6 +6,7 @@ import {
 } from './domain/selection.js'
 import { loadWorkspace, saveWorkspace } from './domain/persistence.js'
 import { browserResourceUrl, createImportedNode, resourceLabel } from './domain/resources.js'
+import { parseQuestionPack } from './domain/questionPacks.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -57,7 +58,12 @@ function getBrowserStorage() {
 }
 
 function readStoredWorkspace() {
-  const fallback = { nodes: initialNodes, activeProject: 'Compiler Design', autoStart: true }
+  const fallback = {
+    nodes: initialNodes,
+    projects: projects.filter((project) => project.name !== 'All focus areas'),
+    activeProject: 'Compiler Design',
+    autoStart: true,
+  }
   const workspace = loadWorkspace(getBrowserStorage(), fallback)
   const storedNodes = Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes
   return {
@@ -66,6 +72,7 @@ function readStoredWorkspace() {
       const { path: _temporaryPath, ...resource } = node.resource
       return { ...node, resource: { ...resource, unavailable: true } }
     }),
+    projects: Array.isArray(workspace.projects) && workspace.projects.length ? workspace.projects : fallback.projects,
     activeProject: typeof workspace.activeProject === 'string' ? workspace.activeProject : fallback.activeProject,
     autoStart: typeof workspace.autoStart === 'boolean' ? workspace.autoStart : fallback.autoStart,
   }
@@ -94,18 +101,24 @@ function Icon({ name }) {
 function App() {
   const [storedWorkspace] = useState(readStoredWorkspace)
   const [nodes, setNodes] = useState(storedWorkspace.nodes)
+  const [focusAreas, setFocusAreas] = useState(storedWorkspace.projects)
   const [activeProject, setActiveProject] = useState(storedWorkspace.activeProject)
   const [screen, setScreen] = useState(storedWorkspace.autoStart ? 'start' : 'plan')
   const [previewNode, setPreviewNode] = useState(null)
   const [catchUpOpen, setCatchUpOpen] = useState(false)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [importDestination, setImportDestination] = useState({ project: storedWorkspace.activeProject === 'All focus areas' ? '' : storedWorkspace.activeProject, parentId: '' })
+  const [topicModalOpen, setTopicModalOpen] = useState(false)
   const [autoStart, setAutoStart] = useState(storedWorkspace.autoStart)
   const [notice, setNotice] = useState('')
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
 
   useEffect(() => {
-    saveWorkspace(getBrowserStorage(), { nodes, activeProject, autoStart })
-  }, [activeProject, autoStart, nodes])
+    saveWorkspace(getBrowserStorage(), { nodes, projects: focusAreas, activeProject, autoStart })
+  }, [activeProject, autoStart, focusAreas, nodes])
+
+  const allProjects = useMemo(() => [{ name: 'All focus areas', color: 'ink' }, ...focusAreas], [focusAreas])
 
   const projectNodes = useMemo(
     () => nodes.filter((node) => activeProject === 'All focus areas' || node.project === activeProject),
@@ -167,18 +180,117 @@ function App() {
     if (!opened) showNotice('The browser blocked the resource window. Allow pop-ups for Just Start.')
   }
 
-  function addFiles(fileList) {
+  async function addFiles(fileList, destination) {
     const files = Array.from(fileList ?? [])
     if (!files.length) return
-    const imported = files.map((file, index) => createImportedNode(file, activeProject, nodes.length + index))
+    const projectName = destination?.project || (activeProject === 'All focus areas' ? 'Imported resources' : activeProject)
+    const imported = []
+    for (const [index, file] of files.entries()) {
+      const node = createImportedNode(file, projectName, nodes.length + index)
+      if (destination?.parentId) {
+        node.parents = [destination.parentId]
+        node.progressThreshold = 0.65
+      }
+      const fileName = String(file.name ?? '').toLowerCase()
+      const mayBeQuestionPack = /\.(?:json|md|markdown)$/.test(fileName)
+      if (mayBeQuestionPack && typeof file.text === 'function') {
+        try {
+          const text = await file.text()
+          const pack = parseQuestionPack(text, file.name)
+          if (pack) {
+            node.title = pack.title
+            node.description = `${pack.questions.length} questions${pack.subject ? ` · ${pack.subject}` : ''}. Optional answers and solutions are kept with the pack.`
+            node.question = pack.questions[0].prompt
+            node.questionPack = pack
+            node.resource.type = 'text'
+          }
+        } catch {
+          // The file is still a normal resource when its contents cannot be read.
+        }
+      }
+      imported.push(node)
+    }
+    if (projectName !== 'Imported resources' && !focusAreas.some((project) => project.name === projectName)) {
+      setFocusAreas((current) => [...current, { name: projectName, color: 'violet' }])
+    }
     setNodes((current) => [...current, ...imported])
+    setActiveProject(projectName)
     setScreen('plan')
-    showNotice(`${imported.length} ${imported.length === 1 ? 'resource' : 'resources'} added to ${activeProject}.`)
+    showNotice(`${imported.length} ${imported.length === 1 ? 'resource' : 'resources'} added to ${projectName}.`)
   }
 
   function handleFileInput(event) {
-    addFiles(event.target.files)
+    addFiles(event.target.files, importDestination)
     event.target.value = ''
+  }
+
+  function openImportModal(destination = {}) {
+    setImportDestination({
+      project: destination.project ?? (activeProject === 'All focus areas' ? '' : activeProject),
+      parentId: destination.parentId ?? '',
+    })
+    setImportModalOpen(true)
+  }
+
+  function chooseImportDestination(destination) {
+    setImportDestination(destination)
+    setImportModalOpen(false)
+    window.setTimeout(() => {
+      if (destination.mode === 'folder') folderInputRef.current?.click()
+      else fileInputRef.current?.click()
+    }, 0)
+  }
+
+  function createTopic({ title, project, parentId, description, question }) {
+    const projectName = project.name
+    const node = {
+      id: `topic-${Date.now()}`,
+      project: projectName,
+      title,
+      eyebrow: `${projectName} · topic`,
+      description: description || `A new topic in ${projectName}.`,
+      question: question || `What is the first useful thing to understand about ${title}?`,
+      resource: { type: 'other', label: 'Topic' },
+      progress: 0,
+      status: 'todo',
+      importance: 0.6,
+      unlockValue: 0.6,
+      startability: 0.75,
+      estimatedMinutes: 15,
+    }
+    if (parentId) {
+      node.parents = [parentId]
+      node.progressThreshold = 0.65
+    }
+    if (!focusAreas.some((focusArea) => focusArea.name === projectName)) {
+      setFocusAreas((current) => [...current, project])
+    }
+    setNodes((current) => [...current, node])
+    setActiveProject(projectName)
+    setTopicModalOpen(false)
+    setScreen('plan')
+    showNotice(`Topic added to ${projectName}.`)
+  }
+
+  function removeNode(nodeId) {
+    const removed = nodes.find((node) => node.id === nodeId)
+    if (!removed) return
+    setNodes((current) => current
+      .filter((node) => node.id !== nodeId)
+      .map((node) => {
+        if (!Array.isArray(node.parents)) return node
+        const parents = node.parents.filter((parent) => (typeof parent === 'object' ? parent.id : parent) !== nodeId)
+        return parents.length ? { ...node, parents } : (() => { const { parents: _parents, progressThreshold: _threshold, ...withoutGate } = node; return withoutGate })()
+      }))
+    showNotice(`Removed ${removed.title}. Its children are now independent.`)
+  }
+
+  function removeFocusArea(projectName) {
+    if (!window.confirm(`Remove ${projectName} and its topics from this workspace?`)) return
+    setFocusAreas((current) => current.filter((project) => project.name !== projectName))
+    setNodes((current) => current.filter((node) => node.project !== projectName))
+    if (activeProject === projectName) setActiveProject('All focus areas')
+    showNotice(`Removed ${projectName}.`)
   }
 
   function toggleAutoStart() {
@@ -227,7 +339,7 @@ function App() {
 
         <div className="sidebar-section-label project-label">Focus areas</div>
         <div className="project-list">
-          {projects.map((project) => (
+          {allProjects.map((project) => (
             <button
               key={project.name}
               className={activeProject === project.name ? 'project-item active' : 'project-item'}
@@ -238,6 +350,7 @@ function App() {
               {project.name !== 'All focus areas' && <span className="project-count">{nodes.filter((node) => node.project === project.name).length}</span>}
             </button>
           ))}
+          <button className="project-item add-project-item" onClick={() => setTopicModalOpen(true)}><Icon name="plus" /><span>New focus area</span></button>
         </div>
 
         <div className="sidebar-bottom">
@@ -267,7 +380,7 @@ function App() {
           <>
             <section className="welcome-row">
               <div><p className="overline">{todayLabel}</p><h1>Good morning, Alex<span className="wave">✦</span></h1><p className="welcome-copy">You do not need to plan the whole day. Just begin with the next useful thing.</p></div>
-              <div className="welcome-actions"><button className="ghost-button" onClick={() => fileInputRef.current?.click()}><Icon name="plus" /> Add resources</button><button className="ghost-button secondary-ghost" onClick={() => setCatchUpOpen(true)}>Log work elsewhere</button></div>
+              <div className="welcome-actions"><button className="ghost-button" onClick={() => openImportModal()}><Icon name="plus" /> Add resources</button><button className="ghost-button secondary-ghost" onClick={() => setCatchUpOpen(true)}>Log work elsewhere</button></div>
             </section>
 
             {recommendation ? (
@@ -297,13 +410,15 @@ function App() {
             </section>
           </>
         ) : (
-          <PlanScreen nodes={projectNodes} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} onAddFiles={() => fileInputRef.current?.click()} onAddFolder={() => folderInputRef.current?.click()} />
+          <PlanScreen nodes={projectNodes} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} onAddFiles={() => openImportModal()} onAddFolder={() => openImportModal({ mode: 'folder' })} onAddTopic={() => setTopicModalOpen(true)} onAddChild={(node) => openImportModal({ project: node.project, parentId: node.id })} onRemoveNode={removeNode} onRemoveProject={removeFocusArea} />
         )}
       </main>
 
       {notice && <div className="toast" role="status"><span className="toast-check">✓</span>{notice}</div>}
       {previewNode && <SessionModal node={previewNode} onClose={() => setPreviewNode(null)} onOpen={() => openSource(previewNode)} onAction={updateNode} />}
       {catchUpOpen && <CatchUpModal nodes={nodes} onClose={() => setCatchUpOpen(false)} onAction={updateNode} />}
+      {importModalOpen && <ImportModal focusAreas={focusAreas} nodes={nodes} initialDestination={importDestination} onClose={() => setImportModalOpen(false)} onChoose={chooseImportDestination} />}
+      {topicModalOpen && <TopicModal focusAreas={focusAreas} nodes={nodes} activeProject={activeProject} onClose={() => setTopicModalOpen(false)} onCreate={createTopic} />}
     </div>
   )
 }
@@ -314,20 +429,56 @@ function PathRow({ node, nodes, onClick }) {
   return <button className="path-row" onClick={onClick}><span className={node.status === 'done' ? 'row-status done' : isBlocked ? 'row-status blocked' : node.status === 'in_progress' ? 'row-status current' : 'row-status'}>{node.status === 'done' ? <Icon name="check" /> : isBlocked ? <Icon name="lock" /> : ''}</span><span className="row-title"><strong>{node.title}</strong><small>{isBlocked ? gate.blockedReasons[0] : statusLabel(node)}</small></span><span className="row-progress"><span style={{ width: `${progressValue(node)}%` }} /></span><span className="row-arrow">›</span></button>
 }
 
-function PlanScreen({ nodes, onOpen, onBack, onAddFiles, onAddFolder }) {
+function PlanScreen({ nodes, onOpen, onBack, onAddFiles, onAddFolder, onAddTopic, onAddChild, onRemoveNode, onRemoveProject }) {
   const [expandedGroups, setExpandedGroups] = useState({})
   const groups = [...new Set(nodes.map((node) => node.project))]
-  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Your plan</p><h1>Everything has a place.</h1><p className="welcome-copy">The graph stays in the background. Your next action stays in front.</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} nodes in this view · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress <span className="legend-dot locked" /> locked</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 8); return <div className="plan-group" key={group}><div className="group-title"><span className="project-dot violet" />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span></div><div className="plan-grid">{visibleNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} onOpen={onOpen} />)}</div>{groupNodes.length > 8 && <button className="show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show fewer' : `Show 8 of ${groupNodes.length} · show more`}</button>}</div>})}</section>
+  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Your plan</p><h1>Everything has a place.</h1><p className="welcome-copy">The graph stays in the background. Your next action stays in front.</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} nodes in this view · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress <span className="legend-dot locked" /> locked</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 8); return <div className="plan-group" key={group}><div className="group-title"><span className="project-dot violet" />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span><button className="remove-area-button" onClick={() => onRemoveProject(group)}>remove area</button></div><div className="plan-grid">{visibleNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} onOpen={onOpen} onAddChild={onAddChild} onRemove={onRemoveNode} />)}</div>{groupNodes.length > 8 && <button className="show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show fewer' : `Show 8 of ${groupNodes.length} · show more`}</button>}</div>})}</section>
 }
 
-function PlanNode({ node, nodes, onOpen }) {
+function PlanNode({ node, nodes, onOpen, onAddChild, onRemove }) {
   const gate = getPrerequisiteStatus(node, nodes)
   const locked = node.status !== 'done' && !gate.satisfied
-  return <button className={locked ? 'plan-node locked' : node.status === 'done' ? 'plan-node done' : 'plan-node'} onClick={() => onOpen(node)}><div className="plan-node-top"><span className="node-index">{node.eyebrow.split('·')[1]?.trim() ?? '•'}</span><span className="node-state">{node.status === 'done' ? 'Done' : locked ? 'Locked' : 'Open'}</span></div><h3>{node.title}</h3><p>{locked ? gate.blockedReasons[0] : node.description}</p><div className="node-footer"><span>{progressValue(node)}%</span><span className="mini-track"><span style={{ width: `${progressValue(node)}%` }} /></span><span>{node.deadline ? formatDueDate(node.deadline) : resourceDescription(node)}</span></div></button>
+  return <div className={locked ? 'plan-node locked' : node.status === 'done' ? 'plan-node done' : 'plan-node'}><button className="plan-node-main" onClick={() => onOpen(node)}><div className="plan-node-top"><span className="node-index">{node.eyebrow.split('·')[1]?.trim() ?? '•'}</span><span className="node-state">{node.status === 'done' ? 'Done' : locked ? 'Locked' : 'Open'}</span></div><h3>{node.title}</h3><p>{locked ? gate.blockedReasons[0] : node.description}</p></button><div className="node-footer"><span>{progressValue(node)}%</span><span className="mini-track"><span style={{ width: `${progressValue(node)}%` }} /></span><span>{node.deadline ? formatDueDate(node.deadline) : resourceDescription(node)}</span><button className="add-child-button" onClick={() => onAddChild(node)} title={`Add a child to ${node.title}`}><Icon name="plus" /> child</button><button className="remove-node-button" onClick={() => onRemove(node.id)} title={`Remove ${node.title}`} aria-label={`Remove ${node.title}`}>×</button></div></div>
 }
 
 function SessionModal({ node, onClose, onOpen, onAction }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="session-modal" role="dialog" aria-modal="true" aria-label={`Start ${node.title}`}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Focus session</span><p className="modal-eyebrow">{node.eyebrow}</p></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><div className="modal-content"><div className="modal-question"><p className="overline">Before you open the source</p><h2>{node.question}</h2><p className="modal-note">Take a guess first. This turns a preview into an active start.</p><div className="answer-line">Write one sentence in your head, then open the resource.</div></div><div className="modal-resource"><div className="resource-header"><span className="pdf-icon">{resourceBadge(node)}</span><div><strong>{resourceLabel(node.resource)}</strong><span>{node.estimatedMinutes ?? 10} minute focus · {node.project}</span></div></div><div className="modal-page"><div className="page-kicker">{node.project}</div><div className="page-title">{node.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div><button className="open-source" onClick={onOpen}>Open source <Icon name="external" /></button></div></div><div className="modal-actions"><button className="secondary-button" onClick={() => onAction(node.id, 'partial')}>Partly done</button><button className="primary-button" onClick={() => onAction(node.id, 'done')}>Mark complete <Icon name="check" /></button><button className="modal-skip" onClick={() => onAction(node.id, 'skip')}>Skip for now</button></div></section></div>
+}
+
+function ImportModal({ focusAreas, nodes, initialDestination, onClose, onChoose }) {
+  const firstProject = initialDestination.project || focusAreas[0]?.name || ''
+  const [projectChoice, setProjectChoice] = useState(firstProject)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [parentId, setParentId] = useState(initialDestination.parentId || '')
+  const effectiveProject = projectChoice === '__new__' ? newProjectName.trim() : projectChoice
+  const parentOptions = nodes.filter((node) => node.project === effectiveProject)
+
+  function choose(mode) {
+    if (!effectiveProject) return
+    onChoose({ project: effectiveProject, parentId, mode })
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="small-modal" role="dialog" aria-modal="true" aria-label="Add resources"><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Add to your plan</span><h2>Where should these go?</h2></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Pick a focus area and optionally make the new resources children of an existing topic.</p><label className="select-label" htmlFor="import-project">Focus area</label><select id="import-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" autoFocus />}{effectiveProject && parentOptions.length > 0 && <><label className="select-label" htmlFor="import-parent">Parent topic <span>(optional)</span></label><select id="import-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · start a new branch</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}<div className="import-actions"><button className="primary-button" onClick={() => choose('files')} disabled={!effectiveProject}>Choose files <Icon name="plus" /></button><button className="secondary-button" onClick={() => choose('folder')} disabled={!effectiveProject}>Choose folder</button></div><p className="form-hint">Any extension is accepted. A question-pack JSON or Markdown file becomes one concise question collection.</p></section></div>
+}
+
+function TopicModal({ focusAreas, nodes, activeProject, onClose, onCreate }) {
+  const initialProject = activeProject !== 'All focus areas' && focusAreas.some((focusArea) => focusArea.name === activeProject) ? activeProject : focusAreas[0]?.name ?? ''
+  const [title, setTitle] = useState('')
+  const [projectChoice, setProjectChoice] = useState(initialProject)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [description, setDescription] = useState('')
+  const [question, setQuestion] = useState('')
+  const [parentId, setParentId] = useState('')
+  const effectiveProject = projectChoice === '__new__' ? newProjectName.trim() : projectChoice
+  const parentOptions = nodes.filter((node) => node.project === effectiveProject)
+
+  function submit(event) {
+    event.preventDefault()
+    if (!title.trim() || !effectiveProject) return
+    onCreate({ title: title.trim(), project: { name: effectiveProject, color: 'violet' }, parentId, description: description.trim(), question: question.trim() })
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal topic-modal" role="dialog" aria-modal="true" aria-label="Create a topic" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Shape your path</span><h2>New topic</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Create a topic now, then attach files or questions to it later.</p><label className="select-label" htmlFor="topic-title">Topic name</label><input id="topic-title" className="text-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Probability puzzles" autoFocus /><label className="select-label" htmlFor="topic-project">Focus area</label><select id="topic-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" />}{effectiveProject && parentOptions.length > 0 && <><label className="select-label" htmlFor="topic-parent">Parent topic <span>(optional)</span></label><select id="topic-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · top-level topic</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}<label className="select-label" htmlFor="topic-description">Short note <span>(optional)</span></label><input id="topic-description" className="text-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What will this branch cover?" /><label className="select-label" htmlFor="topic-question">Start question <span>(optional)</span></label><input id="topic-question" className="text-input" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should I understand first?" /><button className="primary-button full-button" type="submit" disabled={!title.trim() || !effectiveProject}>Create topic <Icon name="check" /></button></form></div>
 }
 
 function CatchUpModal({ nodes, onClose, onAction }) {

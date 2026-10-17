@@ -14,6 +14,8 @@ Just Start is a local-first study and research companion that removes the blank-
 - Local progress persistence through browser storage.
 - Installable browser manifest for a distraction-free standalone window.
 - Add files or whole folders with any file extension; imported resources are automatically classified and added as concise plan nodes.
+- Create new focus areas and topics, attach imported children to an existing topic, and remove topics or whole focus areas as plans change.
+- Import compact JSON or Markdown question packs with optional answers and worked solutions; see `QuestionPacks/README.md`.
 
 The browser/PWA MVP remains available, and a small Electron shell now provides native resource opening and login auto-start. The Auto-start switch controls the opening screen in the browser and also updates OS login auto-start when running in Electron.
 
