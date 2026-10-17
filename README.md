@@ -52,6 +52,7 @@ npm run build
 ## Docker
 
 ```bash
+docker build -t just-start .
 docker run --rm -p 4173:4173 just-start
 ```
 
