@@ -58,6 +58,8 @@ For large collections, download or copy `AI_IMPORT_INSTRUCTIONS.md` into the con
 
 In Just Start, choose **AI bulk intake**, select the manifest JSON, select the matching source files, choose an existing or new focus area, and review the summary before importing. Invalid manifests are rejected with field-level errors; missing source files prevent approval. The app then creates the topics and resources, uploads files to private Supabase Storage when signed in, and keeps ordinary URLs as links. This Phase 1 flow intentionally keeps the AI outside the database: the agent prepares a portable bundle, while Just Start validates and commits it.
 
+To start fresh before a new collection, use **Clear resources** in the sidebar and confirm. This removes the current workspace nodes and, when signed in, attempts to remove their private Supabase Storage files too; it does not delete repository fixture files.
+
 ## Requirements
 
 - Node.js `22.23.3` (see `.nvmrc`)

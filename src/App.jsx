@@ -11,6 +11,7 @@ import { isResearchResource, researchMetadataFromFile, researchNodeFields } from
 import { mergeWorkspaces } from './domain/sync.js'
 import { buildGraphModel } from './domain/graph.js'
 import { normalizeAIIntakeManifest, AIIntakeValidationError } from './domain/aiIntake.js'
+import { readZipFile } from './domain/zipIntake.js'
 import {
   createSupabaseApi,
   createSupabaseBrowserClient,
@@ -364,6 +365,27 @@ function App() {
     }
   }
 
+  async function clearWorkspaceResources() {
+    if (!nodes.length) {
+      showNotice('Your workspace is already empty.')
+      return
+    }
+    if (!window.confirm(`Remove all ${nodes.length} resources and topics from this workspace?`)) return
+    const storagePaths = nodes.map((node) => node?.resource?.storagePath).filter(Boolean)
+    setNodes([])
+    setActiveProject('All focus areas')
+    setScreen('start')
+    if (storagePaths.length && supabaseApi && supabaseSession?.user?.id) {
+      try {
+        await supabaseApi.removeStorageFile(storagePaths)
+      } catch {
+        showNotice('Workspace cleared locally. Some cloud files could not be removed.')
+        return
+      }
+    }
+    showNotice('All workspace resources were removed. You can start a fresh intake.')
+  }
+
   async function addFiles(fileList, destination) {
     const files = Array.from(fileList ?? [])
     if (!files.length) return
@@ -440,6 +462,32 @@ function App() {
   function openAIImport() {
     setAiImportError('')
     setAiImportOpen(true)
+  }
+
+  function addAIImportFiles(nextFiles) {
+    const incoming = Array.from(nextFiles ?? [])
+    if (!incoming.length) return
+    setAiImportFiles((current) => {
+      const merged = new Map(current.map((file) => [String(file.webkitRelativePath || file.name), file]))
+      incoming.forEach((file) => merged.set(String(file.webkitRelativePath || file.name), file))
+      return [...merged.values()]
+    })
+    setAiImportError('')
+  }
+
+  async function handleAIArchive(file) {
+    if (!file) return
+    try {
+      const unpacked = await readZipFile(file)
+      addAIImportFiles(unpacked.files)
+      showNotice(`Unpacked ${unpacked.files.length} source files from ${file.name}.`)
+    } catch (error) {
+      setAiImportError(error instanceof Error ? error.message : 'Unable to unpack this ZIP file.')
+    }
+  }
+
+  function handleAISourceFiles(fileList) {
+    addAIImportFiles(fileList)
   }
 
   async function handleAIManifest(file) {
@@ -694,8 +742,8 @@ function App() {
               <span /> {autoStart ? 'On' : 'Off'}
             </button>
           </div>
-          <button className="nav-item settings-item" onClick={() => showNotice('Settings will keep your local folders and preferences.') }>
-            <Icon name="settings" /> <span>Settings</span>
+          <button className="nav-item settings-item" onClick={clearWorkspaceResources}>
+            <Icon name="settings" /> <span>Clear resources</span>
           </button>
           <button className="nav-item theme-toggle" onClick={toggleTheme} aria-pressed={theme === 'dark'} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} /> <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
@@ -712,7 +760,7 @@ function App() {
         <input ref={folderInputRef} className="hidden-file-input" type="file" multiple accept="*/*" webkitdirectory="" directory="" onChange={handleFileInput} />
         <header className="topbar">
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeProject}</strong></div>
-          <div className="topbar-actions"><span className="saved-indicator"><span className="saved-dot" /> Saved locally</span><button className="icon-button" aria-label="Settings" onClick={() => showNotice('Your progress is stored in this browser for now.')}><Icon name="settings" /></button></div>
+          <div className="topbar-actions"><span className="saved-indicator"><span className="saved-dot" /> Saved locally</span><button className="icon-button" aria-label="Clear workspace resources" onClick={clearWorkspaceResources}><Icon name="settings" /></button></div>
         </header>
 
         {screen === 'start' ? (
@@ -760,7 +808,7 @@ function App() {
       {importModalOpen && <ImportModal focusAreas={focusAreas} nodes={nodes} initialDestination={importDestination} onClose={() => setImportModalOpen(false)} onChoose={chooseImportDestination} />}
       {topicModalOpen && <TopicModal focusAreas={focusAreas} nodes={nodes} activeProject={activeProject} onClose={() => setTopicModalOpen(false)} onCreate={createTopic} />}
       {authModalOpen && <SupabaseAuthModal email={authEmail} message={authMessage} busy={supabaseBusy} configured={supabaseStatus.configured} missing={supabaseStatus.missing} onClose={() => setAuthModalOpen(false)} onSubmit={requestSupabaseSignIn} />}
-      {aiImportOpen && <AIImportModal focusAreas={focusAreas} activeProject={activeProject} manifestResult={aiImportManifest} files={aiImportFiles} error={aiImportError} onClose={() => setAiImportOpen(false)} onManifestFile={handleAIManifest} onFiles={setAiImportFiles} onImport={importAIManifest} />}
+      {aiImportOpen && <AIImportModal focusAreas={focusAreas} activeProject={activeProject} manifestResult={aiImportManifest} files={aiImportFiles} error={aiImportError} onClose={() => setAiImportOpen(false)} onManifestFile={handleAIManifest} onArchive={handleAIArchive} onFiles={handleAISourceFiles} onImport={importAIManifest} />}
     </div>
   )
 }
@@ -932,7 +980,7 @@ function SupabaseAuthModal({ email, message, busy, configured, missing, onClose,
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal auth-modal" role="dialog" aria-modal="true" aria-label="Sign in to cloud sync" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Private cloud sync</span><h2>Keep your workspace with you.</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div>{configured ? <><p className="modal-note">Sign in with a secure magic link. Your topics, progress, graph, and uploaded resources can then follow you across devices.</p><label className="select-label" htmlFor="supabase-email">Email address</label><input id="supabase-email" className="text-input" type="email" value={value} onChange={(event) => setValue(event.target.value)} placeholder="you@example.com" autoFocus required /><button className="primary-button full-button" type="submit" disabled={busy}>{busy ? 'Sending link…' : 'Email me a sign-in link'} <Icon name="arrow" /></button>{message && <p className="auth-message" role="status">{message}</p>}<p className="auth-footnote">Supabase provides the database, authentication, and private file storage. Your local workspace stays available if you sign out.</p></> : <><p className="modal-note">Cloud sync is not configured for this build yet.</p><div className="auth-config-note"><strong>Add these public settings:</strong><code>{missing.map((name) => `${name}=`).join('\n')}</code><span>Use your own Supabase project settings. Never add a service-role key to the browser.</span></div></>}</form></div>
 }
 
-function AIImportModal({ focusAreas, activeProject, manifestResult, files, error, onClose, onManifestFile, onFiles, onImport }) {
+function AIImportModal({ focusAreas, activeProject, manifestResult, files, error, onClose, onManifestFile, onArchive, onFiles, onImport }) {
   const initialProject = activeProject !== 'All focus areas' && focusAreas.some((area) => area.name === activeProject) ? activeProject : focusAreas[0]?.name ?? ''
   const [projectChoice, setProjectChoice] = useState(initialProject)
   const [newProjectName, setNewProjectName] = useState('')
@@ -949,7 +997,7 @@ function AIImportModal({ focusAreas, activeProject, manifestResult, files, error
   const missingFiles = manifestResult?.manifest.items.filter((item) => item.resource.type === 'file' && !sourceFiles.has(item.resource.path) && !sourceFiles.has(item.resource.path.split('/').pop())) ?? []
   const canImport = Boolean(manifestResult && effectiveProject && missingFiles.length === 0)
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="small-modal ai-import-modal" role="dialog" aria-modal="true" aria-label="AI bulk intake"><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> AI bulk intake</span><h2>Bring a whole collection.</h2></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Ask your AI agent to follow <strong>AI_IMPORT_INSTRUCTIONS.md</strong>, then upload its JSON manifest and the matching source files here. Just Start validates everything before importing.</p><label className="select-label" htmlFor="ai-manifest-file">1. AI manifest JSON</label><input id="ai-manifest-file" className="text-input" type="file" accept="application/json,.json" onChange={(event) => { onManifestFile(event.target.files?.[0]); event.target.value = '' }} /><label className="select-label" htmlFor="ai-source-files">2. Source files <span>(select all files used by the manifest)</span></label><input id="ai-source-files" className="text-input" type="file" multiple onChange={(event) => onFiles(Array.from(event.target.files ?? []))} /><label className="select-label" htmlFor="ai-import-project">3. Put this collection in</label><select id="ai-import-project" value={projectChoice} onChange={(event) => setProjectChoice(event.target.value)}><option value="" disabled>Select a focus area</option>{focusAreas.map((area) => <option key={area.name} value={area.name}>{area.name}{area.mode === 'research' ? ' · research' : ''}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <><input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant practice" /><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="study">Study plan · prerequisites allowed</option><option value="research">Research library · no prerequisites</option></select></>}{error && <div className="ai-import-error" role="alert">{error}</div>}{manifestResult && <div className="ai-import-summary"><strong>Ready to review</strong><span>{manifestResult.summary.topicCount} topics · {manifestResult.summary.itemCount} resources · {manifestResult.summary.fileResourceCount} files · {manifestResult.summary.urlResourceCount} links</span>{manifestResult.summary.warningCount > 0 && <small>{manifestResult.summary.warningCount} warnings are preserved for review.</small>}{missingFiles.length > 0 && <small className="ai-import-missing">{missingFiles.length} source file{missingFiles.length === 1 ? '' : 's'} still need to be selected.</small>}</div>}<div className="ai-import-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!canImport} onClick={() => onImport({ project: { name: effectiveProject, color: effectiveMode === 'research' ? 'blue' : 'violet' }, mode: effectiveMode })}>Import collection <Icon name="check" /></button></div></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="small-modal ai-import-modal" role="dialog" aria-modal="true" aria-label="AI bulk intake"><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> AI bulk intake</span><h2>Bring a whole collection.</h2></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Ask your AI agent to follow <strong>AI_IMPORT_INSTRUCTIONS.md</strong>, then upload its JSON manifest and the matching source files here. Just Start validates everything before importing.</p><label className="select-label" htmlFor="ai-manifest-file">1. AI manifest JSON</label><input id="ai-manifest-file" className="text-input" type="file" accept="application/json,.json" onChange={(event) => { onManifestFile(event.target.files?.[0]); event.target.value = '' }} /><label className="select-label" htmlFor="ai-source-archive">2. Source ZIP <span>(recommended for folders)</span></label><input id="ai-source-archive" className="text-input" type="file" accept=".zip,application/zip" onChange={(event) => { onArchive(event.target.files?.[0]); event.target.value = '' }} /><label className="select-label" htmlFor="ai-source-folder">Or add a source folder</label><input id="ai-source-folder" className="text-input" type="file" multiple webkitdirectory="" directory="" onChange={(event) => { onFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} /><label className="select-label" htmlFor="ai-source-files">Or add individual source files</label><input id="ai-source-files" className="text-input" type="file" multiple onChange={(event) => { onFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} /><label className="select-label" htmlFor="ai-import-project">3. Put this collection in</label><select id="ai-import-project" value={projectChoice} onChange={(event) => setProjectChoice(event.target.value)}><option value="" disabled>Select a focus area</option>{focusAreas.map((area) => <option key={area.name} value={area.name}>{area.name}{area.mode === 'research' ? ' · research' : ''}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <><input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant practice" /><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="study">Study plan · prerequisites allowed</option><option value="research">Research library · no prerequisites</option></select></>}{error && <div className="ai-import-error" role="alert">{error}</div>}{manifestResult && <div className="ai-import-summary"><strong>Ready to review</strong><span>{manifestResult.summary.topicCount} topics · {manifestResult.summary.itemCount} resources · {manifestResult.summary.fileResourceCount} files · {manifestResult.summary.urlResourceCount} links</span><small>{files.length} source file{files.length === 1 ? '' : 's'} loaded.</small>{manifestResult.summary.warningCount > 0 && <small>{manifestResult.summary.warningCount} warnings are preserved for review.</small>}{missingFiles.length > 0 && <small className="ai-import-missing">{missingFiles.length} source file{missingFiles.length === 1 ? '' : 's'} still need to be selected.</small>}</div>}{!manifestResult && <div className="ai-import-hint">Select the manifest first. ZIP files are unpacked in your browser and never sent to a third-party service by this step.</div>}<div className="ai-import-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!canImport} onClick={() => onImport({ project: { name: effectiveProject, color: effectiveMode === 'research' ? 'blue' : 'violet' }, mode: effectiveMode })}>Import collection <Icon name="check" /></button></div></section></div>
 }
 
 function CatchUpModal({ nodes, onClose, onAction }) {
