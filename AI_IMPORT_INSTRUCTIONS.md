@@ -1,6 +1,57 @@
-# AI import manifest instructions
+# Just Start AI intake instructions
 
-Use this template when asking an AI system to prepare a Phase 1 intake manifest for Just Start. Return **JSON only**: no Markdown fences, comments, or extra prose.
+Copy this entire document into a ChatGPT conversation (or another AI
+conversation) together with the files you want to import, a ZIP of the files,
+or a plain-text folder structure. The conversation may also contain problem
+links, YouTube URLs, paper citations, or a mixture of all of these. Inspect the
+inputs that are actually attached or written in the conversation; do not claim
+to have opened a file, visited a link, or read a paper that is not available.
+
+Your task is to prepare a small, reviewable study or research collection for
+Just Start. Group related sources into useful topics and turn each usable
+source into one item. Preserve useful source names and URLs so the person can
+match the manifest to the files selected in Just Start.
+
+## Source handling
+
+- **PDFs:** Read the title and available text when possible. Classify each PDF
+  conservatively as lecture notes, a textbook/chapter, a problem set, a paper,
+  or another useful document. Keep the original relative filename in a file
+  resource. A PDF that is clearly a slide export may be treated as a slide
+  deck.
+- **Slide decks:** Treat `.ppt`, `.pptx`, and clearly identified slide-export
+  PDFs as presentations. Make one concise item for a deck unless the input
+  clearly contains useful independent sections. Keep the deck filename as the
+  file path.
+- **Documents:** Handle `.doc`, `.docx`, `.md`, `.txt`, HTML, and similar
+  documents according to their actual content (notes, specifications,
+  tutorials, assignments, or references). Keep the supplied relative path.
+- **Problem links:** Use an `http` or `https` URL resource for an online
+  programming, mathematics, interview, or other problem page. Do not invent a
+  downloaded filename. Include the problem site and any known identifier in
+  the title or description.
+- **YouTube URLs:** Keep a YouTube URL as a URL resource. Use the visible title
+  or surrounding context when available, and add a warning when the video
+  title, transcript, or educational purpose could not be verified. Do not
+  pretend to have watched the video.
+- **Papers:** For a paper file, use its attached relative filename as the file
+  resource and put known citation details in `research` (title, authors, year,
+  DOI, venue, and/or `sourceUrl`). For a paper URL without an attached file,
+  use the URL resource. Do not fabricate authors, dates, DOI values, venues, or
+  findings; mark incomplete or inferred metadata with a warning.
+- **Uncertain classifications:** Do not guess silently. Use a broad, useful
+  topic or title, keep the original source as the resource, and add a specific
+  warning such as `Classification inferred from filename; review before use.`
+  If a source is clearly unrelated, duplicate, or only operating-system
+  metadata (for example `.DS_Store`, `Thumbs.db`, or `__MACOSX` entries), omit
+  it. If a source cannot be safely matched to an attached path or real URL,
+  omit it or explain the uncertainty in the manifest-level `warnings` array.
+
+## Output contract
+
+Return **JSON only**. Do not use Markdown fences, headings, comments, prose,
+or a preamble before or after the JSON. The top-level object must have exactly
+these supported fields:
 
 ```json
 {
@@ -42,16 +93,39 @@ Use this template when asking an AI system to prepare a Phase 1 intake manifest 
 }
 ```
 
-## Contract
+The example is illustrative: omit optional fields that are not supported by
+the inputs. Follow these rules exactly:
 
-- `schemaVersion` is exactly the string `"1.0"`.
-- `topics` and `items` are non-empty arrays. Every topic and item has an explicit, stable, unique string `id`; IDs are shared across both arrays and may contain letters, numbers, `.`, `_`, `:`, or `-`.
-- Every item has a non-empty `title`, a `topicId` pointing to a topic, and one `resource` object.
-- A file resource is `{ "type": "file", "path": "..." }`. Its path is relative to the workspace: do not use a leading slash, a Windows drive/UNC prefix, `..` path segments, or `file:` URLs.
-- A URL resource is `{ "type": "url", "url": "https://..." }`. Only `http` and `https` URLs are accepted; do not include credentials in a URL.
-- `parents`, when present, is an array of item IDs. Parents must exist, cannot be the item itself, and cannot form a cycle.
-- `estimatedMinutes`, when present, is a positive integer. `difficulty` is one of `beginner`, `intermediate`, `advanced`, or `expert` (the aliases `easy`, `medium`, and `hard` are accepted and normalized).
-- `description`, `research`, and `warnings` are optional. Warnings are strings; research metadata must be JSON data and must not contain secrets.
-- The importer rejects malformed data instead of guessing. Fix each reported field path and try again.
+1. `schemaVersion` is the string `"1.0"`. `topics` and `items` are both
+   non-empty arrays.
+2. Every topic and item has a stable, unique string `id` shared across both
+   arrays. IDs may contain only letters, numbers, `.`, `_`, `:`, and `-`.
+   Do not use array indexes as IDs.
+3. Every item has a non-empty `title`, a `topicId` that names a topic, and one
+   `resource` object. A resource is either
+   `{ "type": "file", "path": "..." }` or
+   `{ "type": "url", "url": "https://..." }`.
+4. File paths must be relative to the supplied folder structure or archive
+   root. Use forward slashes, such as `lectures/week-01.pdf`. Never use an
+   absolute path, Windows drive or UNC prefix, a leading slash, `..` path
+   segments, `file:` URLs, or a path to a secret. Use the exact relative path
+   shown with the attachment when one is available.
+5. URL resources must use only `http` or `https` and must not contain a
+   username, password, API key, token, or other credentials. This includes
+   YouTube links.
+6. `parents`, when present, contains existing item IDs. A parent cannot be the
+   item itself, and prerequisite relationships must not form a cycle. Only add
+   prerequisites supported by the source collection; otherwise omit `parents`.
+7. `estimatedMinutes`, when present, is a positive integer. `difficulty`, when
+   present, is one of `beginner`, `intermediate`, `advanced`, or `expert`.
+8. `description`, `research`, and `warnings` are optional. Warnings must be
+   strings. Research metadata must be JSON data, contain no secrets, and only
+   include facts supported by the inputs. Put uncertainty, inferred metadata,
+   inaccessible links, and incomplete citations in warnings.
+9. Do not add fields outside the contract, do not embed file contents, and do
+   not return credentials or private tokens. Check that every referenced file
+   path exists in the supplied folder structure or attachments and that every
+   URL is copied accurately before responding.
 
-Keep paths workspace-relative, use stable IDs rather than array indexes, and include a warning when source metadata is inferred or incomplete.
+Return the completed Just Start manifest as one valid JSON object and nothing
+else.

@@ -367,3 +367,13 @@ export function normalizeAIIntakeManifest(value) {
 // Aliases keep the domain API discoverable for callers using either spelling.
 export const normaliseAIIntakeManifest = normalizeAIIntakeManifest
 export const normalizeAndValidateAIIntake = normalizeAIIntakeManifest
+
+export {
+  ZipPathError,
+  enumerateZipFiles,
+  isObviousZipMetadata,
+  normalizeZipPath,
+  readZipArchive,
+  readZipFile,
+  unpackZipFile,
+} from './zipIntake.js'
