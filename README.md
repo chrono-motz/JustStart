@@ -14,7 +14,7 @@ Just Start is a local-first study and research companion that removes the blank-
 - Local progress persistence through browser storage.
 - Installable browser manifest for a distraction-free standalone window.
 - Persisted light/dark mode from the sidebar.
-- Optional free Google Drive sync for the same workspace, files, and completions on phone and laptop.
+- Optional Supabase cloud sync for the same workspace, files, and completions on phone and laptop.
 - Add files or whole folders with any file extension; imported resources are automatically classified and added as concise plan nodes.
 - Create new focus areas and topics, attach imported children to an existing topic, and remove topics or whole focus areas as plans change.
 - Import compact JSON or Markdown question packs with optional answers and worked solutions; see `QuestionPacks/README.md`.
@@ -24,33 +24,32 @@ The browser/PWA MVP remains available, and a small Electron shell now provides n
 
 Research is intentionally a different mode from coursework: it is a shelf for broad reading and triage, not a directed learning graph. Later work can add DOI/API enrichment, duplicate detection, paper notes, reading queues, and citation links without changing the study graph semantics.
 
-Use **Add resources** for individual files or **Add folder** in **My plan** for a directory. The picker accepts all file types. On phone or desktop, add files from the device where they are available; files left only on another device must be moved or added there first. Large collections are kept concise: the plan initially shows eight resources per focus area and offers a “show more” control rather than rendering hundreds at once. Without Drive sync, imported browser files are available immediately in the current session and must be added again after a reload because object URLs are temporary. With Drive sync, uploaded files keep their Drive file IDs and remain available across devices.
+Use **Add resources** for individual files or **Add folder** in **My plan** for a directory. The picker accepts all file types. On phone or desktop, add files from the device where they are available; files left only on another device must be moved or added there first. Large collections are kept concise: the plan initially shows eight resources per focus area and offers a “show more” control rather than rendering hundreds at once. Without cloud sync, imported browser files are available immediately in the current session and must be added again after a reload because object URLs are temporary. After signing in to Supabase, the workspace is stored in Postgres and uploaded resources are stored in a private Storage bucket.
 
-## Free Google Drive sync
+## Supabase cloud sync
 
-Google Drive is optional. Without configuration, Just Start remains local-only. With it, click **Connect Google Drive** in the sidebar and approve access through Google's OAuth page. No Google password or token is entered into Just Start chat or source files.
+Supabase is optional. Without configuration, Just Start remains local-only. With it, click **Sign in to sync** in the sidebar and request a passwordless email link. Supabase provides authentication, Postgres workspace storage, and private file storage without requiring a custom backend for this browser app.
 
-Create a Google Cloud project, enable the Google Drive API, configure an OAuth consent screen, add your Google account as a test user, and create a Web OAuth client. Put only the client ID in a local `.env` file:
+Create a Supabase project, run `supabase/schema.sql` in the Supabase SQL Editor, and put only the browser-safe project settings in a local `.env` file:
 
 ```bash
 cp .env.example .env
 ```
 
 ```env
-VITE_GOOGLE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 ```
 
-Add this authorized JavaScript origin during local development:
+The publishable key is safe to expose in the browser when the included Row Level Security policies are installed. Never put a Supabase secret/service-role key in `.env`, source code, Vite client configuration, or the repository. Each self-hosting user can create their own Supabase project and provide their own URL and publishable key.
+
+For local development, configure the Supabase Auth URL settings to allow the origin where the app is running, for example:
 
 ```text
 http://localhost:5173
 ```
 
-The app requests the limited `drive.file` scope and creates a private `JustStart` folder in Drive. It stores `workspace.json` plus uploaded resources there. The same Google account can connect from a phone and laptop, so progress and Drive-backed files can sync without being on the same Wi-Fi. Existing local folders must be selected once with **Add folder** so Just Start can upload them; a browser cannot scan private laptop folders automatically.
-
-Use the same Google OAuth client ID for local and production builds, and add every allowed origin to that client. This keeps files created by Just Start under one app identity when you move between localhost and the deployed website.
-
-Google Drive provides free quota within your account limits. This browser-only integration does not require a paid backend. OAuth test-mode restrictions still apply until you publish or verify the OAuth consent screen.
+The same Supabase account can sign in from a phone and laptop, so progress and private resources can sync without being on the same Wi-Fi. Existing local folders must be selected once with **Add folder** so Just Start can upload them; a browser cannot scan private laptop folders automatically.
 
 ## Requirements
 
@@ -95,15 +94,15 @@ The test command is offline after dependencies have been installed.
 npm run build
 ```
 
-The generated `dist/` directory is static and can be hosted on a free static host such as Cloudflare Pages, GitHub Pages, or Netlify. Set `VITE_GOOGLE_CLIENT_ID` in that host's build environment and add the deployed HTTPS origin to the Google OAuth client. After deployment, the PWA can be opened from phone or laptop anywhere with an internet connection.
+The generated `dist/` directory is static and can be hosted on a free static host such as Cloudflare Pages, GitHub Pages, or Netlify. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in that host's build environment and add the deployed HTTPS origin to Supabase Auth's allowed URL list. After deployment, the PWA can be opened from phone or laptop anywhere with an internet connection.
 
 ## Deploy a static build
 
 1. Run `npm ci` with Node.js `22.23.3`.
-2. Set `VITE_GOOGLE_CLIENT_ID` in the deployment provider's build settings when Drive sync is wanted.
+2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in the deployment provider's build settings when cloud sync is wanted.
 3. Run `npm run build`.
 4. Publish the contents of `dist/` as the site's static files.
-5. Add the deployed HTTPS origin to the Google OAuth client's authorized JavaScript origins.
+5. Add the deployed HTTPS origin to Supabase Auth's allowed URL list.
 
 The repository is intentionally self-contained for clean Linux rebuilds: `.nvmrc` pins Node.js, `package-lock.json` pins npm dependencies, `.env.example` documents configuration without secrets, `make test` is the single offline test entry point after `npm ci`, and `Dockerfile` builds and serves the static app.
 

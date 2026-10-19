@@ -8,10 +8,16 @@ import { loadWorkspace, saveWorkspace } from './domain/persistence.js'
 import { browserResourceUrl, createImportedNode, resourceLabel } from './domain/resources.js'
 import { parseQuestionPack } from './domain/questionPacks.js'
 import { isResearchResource, researchMetadataFromFile, researchNodeFields } from './domain/research.js'
-import { createDriveClient, DRIVE_APP_FOLDER_NAME } from './domain/drive.js'
-import { requestDriveAccess } from './domain/googleAuth.js'
-import { makeSyncEnvelope, mergeWorkspaces, normaliseSyncedWorkspace } from './domain/sync.js'
+import { mergeWorkspaces } from './domain/sync.js'
 import { buildGraphModel } from './domain/graph.js'
+import {
+  createSupabaseApi,
+  createSupabaseBrowserClient,
+  getSupabaseConfigStatus,
+  getSupabaseSession,
+  signInWithMagicLink,
+  signOut,
+} from './domain/supabase.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -63,37 +69,12 @@ function getBrowserStorage() {
 }
 
 const THEME_STORAGE_KEY = 'just-start.theme'
-const DRIVE_STATE_STORAGE_KEY = 'just-start.drive'
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 function readStoredTheme() {
   try {
     return getBrowserStorage()?.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light'
   } catch {
     return 'light'
-  }
-}
-
-function readStoredDriveState() {
-  try {
-    const raw = getBrowserStorage()?.getItem(DRIVE_STATE_STORAGE_KEY)
-    const value = raw ? JSON.parse(raw) : null
-    return value && typeof value === 'object' ? value : { connected: false }
-  } catch {
-    return { connected: false }
-  }
-}
-
-function deviceId() {
-  try {
-    const storage = getBrowserStorage()
-    const existing = storage?.getItem('just-start.device')
-    if (existing) return existing
-    const next = globalThis.crypto?.randomUUID?.() || `device-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    storage?.setItem('just-start.device', next)
-    return next
-  } catch {
-    return 'browser-device'
   }
 }
 
@@ -162,9 +143,20 @@ function Icon({ name }) {
 function App() {
   const [storedWorkspace] = useState(readStoredWorkspace)
   const [theme, setTheme] = useState(readStoredTheme)
-  const [driveConnection, setDriveConnection] = useState(readStoredDriveState)
-  const [driveToken, setDriveToken] = useState('')
-  const [driveBusy, setDriveBusy] = useState(false)
+  const supabaseStatus = useMemo(() => getSupabaseConfigStatus(), [])
+  const supabaseClient = useMemo(
+    () => supabaseStatus.configured ? createSupabaseBrowserClient() : null,
+    [supabaseStatus.configured],
+  )
+  const supabaseApi = useMemo(
+    () => supabaseClient ? createSupabaseApi({ client: supabaseClient }) : null,
+    [supabaseClient],
+  )
+  const [supabaseSession, setSupabaseSession] = useState(null)
+  const [supabaseBusy, setSupabaseBusy] = useState(false)
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [authEmail, setAuthEmail] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
   const [nodes, setNodes] = useState(storedWorkspace.nodes)
   const [focusAreas, setFocusAreas] = useState(storedWorkspace.projects)
   const [activeProject, setActiveProject] = useState(storedWorkspace.activeProject)
@@ -178,46 +170,42 @@ function App() {
   const [notice, setNotice] = useState('')
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
-  const driveSyncInFlight = useRef(false)
-  const driveDeviceId = useMemo(deviceId, [])
-  const driveClient = useMemo(
-    () => driveToken ? createDriveClient({ accessToken: driveToken }) : null,
-    [driveToken],
-  )
+  const supabaseSyncInFlight = useRef(false)
+  const supabaseSyncReady = useRef(false)
 
   useEffect(() => {
     saveWorkspace(getBrowserStorage(), { nodes, projects: focusAreas, activeProject, autoStart })
   }, [activeProject, autoStart, focusAreas, nodes])
 
   useEffect(() => {
-    try {
-      getBrowserStorage()?.setItem(DRIVE_STATE_STORAGE_KEY, JSON.stringify(driveConnection))
-    } catch {
-      // Drive connection metadata is only a convenience; OAuth remains the source of access.
+    if (!supabaseClient) return undefined
+    let active = true
+    getSupabaseSession({ client: supabaseClient }).then((session) => {
+      if (active) setSupabaseSession(session)
+    }).catch(() => {
+      if (active) showNotice('Unable to check cloud sign-in status.')
+    })
+    const { data } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      if (active) setSupabaseSession(session)
+    })
+    return () => {
+      active = false
+      data?.subscription?.unsubscribe()
     }
-  }, [driveConnection])
+  }, [supabaseClient])
 
   useEffect(() => {
-    if (!driveClient || driveBusy) return undefined
-    const timer = window.setTimeout(async () => {
-      try {
-        await driveClient.putWorkspaceFile(makeSyncEnvelope(
-          syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart),
-          driveDeviceId,
-          new Date(),
-        ))
-        setDriveConnection((current) => ({ ...current, connected: true, lastSyncedAt: new Date().toISOString() }))
-      } catch {
-        showNotice('Drive sync paused. Your local changes are still safe.')
-      }
-    }, 900)
-    const poll = window.setInterval(async () => {
-      if (driveSyncInFlight.current || driveBusy) return
-      driveSyncInFlight.current = true
-      try {
-        const remoteFile = await driveClient.getWorkspaceFile()
-        const remoteWorkspace = normaliseSyncedWorkspace(remoteFile?.content, null)
-        if (!remoteWorkspace) return
+    if (!supabaseApi || !supabaseSession?.user?.id) {
+      supabaseSyncReady.current = false
+      return undefined
+    }
+    let active = true
+    supabaseSyncReady.current = false
+    setSupabaseBusy(true)
+    supabaseApi.readWorkspace().then((remoteRow) => {
+      if (!active) return
+      const remoteWorkspace = remoteRow?.data
+      if (remoteWorkspace) {
         const mergedWorkspace = mergeWorkspaces(
           syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart),
           remoteWorkspace,
@@ -226,34 +214,32 @@ function App() {
         setFocusAreas(mergedWorkspace.projects)
         setActiveProject(mergedWorkspace.activeProject || activeProject)
         setAutoStart(typeof mergedWorkspace.autoStart === 'boolean' ? mergedWorkspace.autoStart : autoStart)
-        await driveClient.putWorkspaceFile(makeSyncEnvelope(mergedWorkspace, driveDeviceId, new Date()), {
-          fileId: remoteFile?.id,
-        })
-        setDriveConnection((current) => ({ ...current, connected: true, lastSyncedAt: new Date().toISOString() }))
-      } catch {
-        // Keep working locally; the next poll or token refresh can recover sync.
-      } finally {
-        driveSyncInFlight.current = false
+        showNotice('Cloud workspace loaded.')
       }
-    }, 60_000)
-    return () => {
-      window.clearTimeout(timer)
-      window.clearInterval(poll)
-    }
-  }, [activeProject, autoStart, driveBusy, driveClient, driveDeviceId, focusAreas, nodes])
+      supabaseSyncReady.current = true
+    }).catch(() => {
+      if (active) showNotice('Cloud workspace could not be loaded. Local work is safe.')
+    }).finally(() => {
+      if (active) setSupabaseBusy(false)
+    })
+    return () => { active = false }
+  }, [supabaseApi, supabaseSession?.user?.id])
 
   useEffect(() => {
-    if (!driveToken) return undefined
-    const refresh = window.setTimeout(async () => {
+    if (!supabaseApi || !supabaseSession?.user?.id || !supabaseSyncReady.current || supabaseBusy) return undefined
+    const timer = window.setTimeout(async () => {
+      if (supabaseSyncInFlight.current) return
+      supabaseSyncInFlight.current = true
       try {
-        const { accessToken } = await requestDriveAccess({ clientId: GOOGLE_CLIENT_ID })
-        setDriveToken(accessToken)
+        await supabaseApi.upsertWorkspace(syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart))
       } catch {
-        showNotice('Drive access expired. Click Reconnect Drive to continue syncing.')
+        showNotice('Cloud sync paused. Your local changes are still safe.')
+      } finally {
+        supabaseSyncInFlight.current = false
       }
-    }, 45 * 60 * 1000)
-    return () => window.clearTimeout(refresh)
-  }, [driveToken])
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [activeProject, autoStart, focusAreas, nodes, supabaseApi, supabaseBusy, supabaseSession?.user?.id])
 
   useEffect(() => {
     try {
@@ -313,21 +299,22 @@ function App() {
     setCatchUpOpen(false)
   }
 
-  function openSource(node) {
+  async function openSource(node) {
     const sourcePath = node?.resource?.path
     const browserUrl = browserResourceUrl(node?.resource)
-    const driveFileId = node?.resource?.driveFileId
-    if (driveFileId && !browserUrl && !sourcePath) {
-      if (!driveClient) {
-        showNotice('Connect Google Drive to open this file on this device.')
-        return
+    const storagePath = node?.resource?.storagePath
+    if (storagePath && supabaseApi && supabaseSession?.user?.id) {
+      try {
+        const signedUrl = await supabaseApi.createSignedStorageUrl(storagePath)
+        const opened = window.open(signedUrl, '_blank', 'noopener,noreferrer')
+        if (!opened) showNotice('The browser blocked the resource window. Allow pop-ups for Just Start.')
+      } catch {
+        showNotice('Unable to open this cloud resource right now.')
       }
-      const opened = window.open(driveClient.webViewUrl(driveFileId), '_blank', 'noopener,noreferrer')
-      if (!opened) showNotice('The browser blocked the Drive file window. Allow pop-ups for Just Start.')
       return
     }
     if (!browserUrl && !sourcePath) {
-      showNotice('This resource needs to be added again before it can open.')
+      showNotice(storagePath ? 'Sign in to open this cloud resource.' : 'This resource needs to be added again before it can open.')
       return
     }
     if (window.justStart?.openResource && sourcePath && !/^(?:blob|data):/i.test(sourcePath)) {
@@ -340,52 +327,43 @@ function App() {
     if (!opened) showNotice('The browser blocked the resource window. Allow pop-ups for Just Start.')
   }
 
-  async function connectGoogleDrive() {
-    if (driveBusy) return
-    setDriveBusy(true)
+  async function requestSupabaseSignIn(email) {
+    if (!supabaseApi || !supabaseStatus.configured) {
+      showNotice(`Cloud sync needs ${supabaseStatus.missing.join(' and ')}.`)
+      return
+    }
+    setSupabaseBusy(true)
     try {
-      const { accessToken } = await requestDriveAccess({ clientId: GOOGLE_CLIENT_ID })
-      const client = createDriveClient({ accessToken })
-      const remoteFile = await client.getWorkspaceFile()
-      const localWorkspace = syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart)
-      const remoteWorkspace = remoteFile ? normaliseSyncedWorkspace(remoteFile.content, null) : null
-      const mergedWorkspace = remoteWorkspace
-        ? mergeWorkspaces(localWorkspace, remoteWorkspace)
-        : localWorkspace
-      const written = await client.putWorkspaceFile(
-        makeSyncEnvelope(mergedWorkspace, driveDeviceId, new Date()),
-        remoteFile?.id ? { fileId: remoteFile.id } : {},
-      )
-      setNodes(Array.isArray(mergedWorkspace.nodes) ? mergedWorkspace.nodes : nodes)
-      setFocusAreas(Array.isArray(mergedWorkspace.projects) ? mergedWorkspace.projects : focusAreas)
-      setActiveProject(mergedWorkspace.activeProject || activeProject)
-      setAutoStart(typeof mergedWorkspace.autoStart === 'boolean' ? mergedWorkspace.autoStart : autoStart)
-      setDriveToken(accessToken)
-      setDriveConnection({
-        connected: true,
-        folderId: written?.parents?.[0] || remoteFile?.parents?.[0],
-        workspaceFileId: written?.id || remoteFile?.id,
-        lastSyncedAt: new Date().toISOString(),
-      })
-      showNotice(`Google Drive connected. ${remoteWorkspace ? 'Workspace merged.' : `${DRIVE_APP_FOLDER_NAME} folder created.`}`)
+      await signInWithMagicLink(email, { client: supabaseClient, redirectTo: window.location.origin })
+      setAuthEmail(email)
+      setAuthMessage('Check your email for the secure sign-in link. This window can stay open.')
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : 'Google Drive connection failed.')
+      setAuthMessage(error instanceof Error ? error.message : 'Unable to send the sign-in link.')
     } finally {
-      setDriveBusy(false)
+      setSupabaseBusy(false)
     }
   }
 
-  function disconnectGoogleDrive() {
-    setDriveToken('')
-    setDriveConnection({ connected: false })
-    showNotice('Google Drive disconnected on this device. Local work remains available.')
+  async function disconnectSupabase() {
+    if (!supabaseApi) return
+    setSupabaseBusy(true)
+    try {
+      await signOut({ client: supabaseClient })
+      supabaseSyncReady.current = false
+      setSupabaseSession(null)
+      showNotice('Cloud sync disconnected. Local work remains available.')
+    } catch {
+      showNotice('Unable to disconnect cloud sync right now.')
+    } finally {
+      setSupabaseBusy(false)
+    }
   }
 
   async function addFiles(fileList, destination) {
     const files = Array.from(fileList ?? [])
     if (!files.length) return
-    const uploading = Boolean(driveClient)
-    if (uploading) setDriveBusy(true)
+    const uploading = Boolean(supabaseApi && supabaseSession?.user?.id)
+    if (uploading) setSupabaseBusy(true)
     const projectName = destination?.project || (activeProject === 'All focus areas' ? 'Imported resources' : activeProject)
     const projectMode = destination?.projectMode || focusAreas.find((focusArea) => focusArea.name === projectName)?.mode || 'study'
     const imported = []
@@ -423,27 +401,27 @@ function App() {
             // The file is still a normal resource when its contents cannot be read.
           }
         }
-        if (driveClient) {
+        if (supabaseApi && supabaseSession?.user?.id) {
           try {
-            const uploaded = await driveClient.uploadFile({
-              name: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              content: file,
+            const storagePath = `${node.id}/${file.name || 'resource'}`
+            await supabaseApi.uploadStorageFile(storagePath, file, {
+              cacheControl: '3600',
+              upsert: true,
+              contentType: file.type || 'application/octet-stream',
             })
             node.resource = {
               ...node.resource,
-              driveFileId: uploaded.id,
-              driveWebViewUrl: driveClient.webViewUrl(uploaded.id),
-              source: 'google-drive',
+              storagePath,
+              source: 'supabase',
             }
           } catch {
-            showNotice(`${file.name} stayed local because Drive upload failed.`)
+            showNotice(`${file.name} stayed local because cloud upload failed.`)
           }
         }
         imported.push(node)
       }
     } finally {
-      if (uploading) setDriveBusy(false)
+      if (uploading) setSupabaseBusy(false)
     }
     if (projectName !== 'Imported resources' && !focusAreas.some((project) => project.name === projectName)) {
       setFocusAreas((current) => [...current, { name: projectName, color: projectMode === 'research' ? 'blue' : 'violet', mode: projectMode }])
@@ -612,10 +590,10 @@ function App() {
           <button className="nav-item theme-toggle" onClick={toggleTheme} aria-pressed={theme === 'dark'} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} /> <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
           </button>
-          <button className="nav-item drive-toggle" onClick={driveToken ? disconnectGoogleDrive : connectGoogleDrive} disabled={driveBusy} aria-label={driveToken ? 'Disconnect Google Drive' : 'Connect Google Drive'}>
-            <Icon name="cloud" /> <span>{driveBusy ? 'Connecting…' : driveToken ? 'Drive synced' : driveConnection.connected ? 'Reconnect Drive' : 'Connect Google Drive'}</span>
+          <button className="nav-item drive-toggle" onClick={supabaseSession ? disconnectSupabase : () => { setAuthMessage(''); setAuthModalOpen(true) }} disabled={supabaseBusy} aria-label={supabaseSession ? 'Disconnect cloud sync' : 'Sign in to cloud sync'}>
+            <Icon name="cloud" /> <span>{supabaseBusy ? 'Syncing…' : supabaseSession ? 'Cloud synced' : supabaseStatus.configured ? 'Sign in to sync' : 'Configure cloud sync'}</span>
           </button>
-          <div className="profile-row"><div className="avatar">A</div><div><strong>Alex</strong><span>Local workspace</span></div><span className="more">•••</span></div>
+          <div className="profile-row"><div className="avatar">A</div><div><strong>Alex</strong><span>{supabaseSession?.user?.email || 'Local workspace'}</span></div><span className="more">•••</span></div>
         </div>
       </aside>
 
@@ -671,6 +649,7 @@ function App() {
       {catchUpOpen && <CatchUpModal nodes={nodes} onClose={() => setCatchUpOpen(false)} onAction={updateNode} />}
       {importModalOpen && <ImportModal focusAreas={focusAreas} nodes={nodes} initialDestination={importDestination} onClose={() => setImportModalOpen(false)} onChoose={chooseImportDestination} />}
       {topicModalOpen && <TopicModal focusAreas={focusAreas} nodes={nodes} activeProject={activeProject} onClose={() => setTopicModalOpen(false)} onCreate={createTopic} />}
+      {authModalOpen && <SupabaseAuthModal email={authEmail} message={authMessage} busy={supabaseBusy} configured={supabaseStatus.configured} missing={supabaseStatus.missing} onClose={() => setAuthModalOpen(false)} onSubmit={requestSupabaseSignIn} />}
     </div>
   )
 }
@@ -829,6 +808,17 @@ function TopicModal({ focusAreas, nodes, activeProject, onClose, onCreate }) {
   }
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal topic-modal" role="dialog" aria-modal="true" aria-label="Create a topic" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Shape your path</span><h2>New topic</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div><p className="modal-note">Create a topic now, then attach files or questions to it later.</p><label className="select-label" htmlFor="topic-title">Topic name</label><input id="topic-title" className="text-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Probability puzzles" autoFocus /><label className="select-label" htmlFor="topic-project">Focus area</label><select id="topic-project" value={projectChoice} onChange={(event) => { setProjectChoice(event.target.value); setParentId('') }}><option value="" disabled>Select a focus area</option>{focusAreas.map((focusArea) => <option key={focusArea.name} value={focusArea.name}>{focusArea.name}{focusArea.mode === 'research' ? ' · research' : ''}</option>)}<option value="__new__">＋ Create a new focus area</option></select>{projectChoice === '__new__' && <><input className="text-input" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="e.g. Quant Puzzles" /><label className="select-label" htmlFor="topic-mode">Area type</label><select id="topic-mode" value={newProjectMode} onChange={(event) => { setNewProjectMode(event.target.value); setParentId('') }}><option value="study">Study plan · prerequisites allowed</option><option value="research">Research library · no prerequisites</option></select></>}{effectiveProject && effectiveMode !== 'research' && parentOptions.length > 0 && <><label className="select-label" htmlFor="topic-parent">Parent topic <span>(optional)</span></label><select id="topic-parent" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent · top-level topic</option>{parentOptions.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select></>}{effectiveMode === 'research' && <div className="research-callout">Research topics are broad shelves. Papers in them are never blocked by prerequisites.</div>}<label className="select-label" htmlFor="topic-description">Short note <span>(optional)</span></label><input id="topic-description" className="text-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What will this branch cover?" /><label className="select-label" htmlFor="topic-question">Start question <span>(optional)</span></label><input id="topic-question" className="text-input" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should I understand first?" /><button className="primary-button full-button" type="submit" disabled={!title.trim() || !effectiveProject}>Create topic <Icon name="check" /></button></form></div>
+}
+
+function SupabaseAuthModal({ email, message, busy, configured, missing, onClose, onSubmit }) {
+  const [value, setValue] = useState(email)
+
+  function submit(event) {
+    event.preventDefault()
+    if (value.trim()) onSubmit(value.trim())
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal auth-modal" role="dialog" aria-modal="true" aria-label="Sign in to cloud sync" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Private cloud sync</span><h2>Keep your workspace with you.</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div>{configured ? <><p className="modal-note">Sign in with a secure magic link. Your topics, progress, graph, and uploaded resources can then follow you across devices.</p><label className="select-label" htmlFor="supabase-email">Email address</label><input id="supabase-email" className="text-input" type="email" value={value} onChange={(event) => setValue(event.target.value)} placeholder="you@example.com" autoFocus required /><button className="primary-button full-button" type="submit" disabled={busy}>{busy ? 'Sending link…' : 'Email me a sign-in link'} <Icon name="arrow" /></button>{message && <p className="auth-message" role="status">{message}</p>}<p className="auth-footnote">Supabase provides the database, authentication, and private file storage. Your local workspace stays available if you sign out.</p></> : <><p className="modal-note">Cloud sync is not configured for this build yet.</p><div className="auth-config-note"><strong>Add these public settings:</strong><code>{missing.map((name) => `${name}=`).join('\n')}</code><span>Use your own Supabase project settings. Never add a service-role key to the browser.</span></div></>}</form></div>
 }
 
 function CatchUpModal({ nodes, onClose, onAction }) {
