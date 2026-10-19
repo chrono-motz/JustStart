@@ -480,6 +480,8 @@ function App() {
     try {
       const unpacked = await readZipFile(file)
       addAIImportFiles(unpacked.files)
+      const manifestFile = unpacked.files.find((entry) => /(?:^|\/)(?:manifest|just-start-manifest)\.json$/i.test(String(entry.webkitRelativePath || entry.name)))
+      if (manifestFile) await handleAIManifest(manifestFile)
       showNotice(`Unpacked ${unpacked.files.length} source files from ${file.name}.`)
     } catch (error) {
       setAiImportError(error instanceof Error ? error.message : 'Unable to unpack this ZIP file.')
