@@ -15,6 +15,7 @@ Just Start is a local-first study and research companion that removes the blank-
 - Installable browser manifest for a distraction-free standalone window.
 - Persisted light/dark mode from the sidebar.
 - Optional Supabase cloud sync for the same workspace, files, and completions on phone and laptop.
+- AI Bulk Intake for importing a validated collection of topics, local files, and problem links in one reviewable pass.
 - Add files or whole folders with any file extension; imported resources are automatically classified and added as concise plan nodes.
 - Create new focus areas and topics, attach imported children to an existing topic, and remove topics or whole focus areas as plans change.
 - Import compact JSON or Markdown question packs with optional answers and worked solutions; see `QuestionPacks/README.md`.
@@ -50,6 +51,12 @@ http://localhost:5173
 ```
 
 The same Supabase account can sign in from a phone and laptop, so progress and private resources can sync without being on the same Wi-Fi. Existing local folders must be selected once with **Add folder** so Just Start can upload them; a browser cannot scan private laptop folders automatically.
+
+## AI Bulk Intake
+
+For large collections, download or copy `AI_IMPORT_INSTRUCTIONS.md` into the context you give to your own AI agent. Ask the agent to inspect the collection and return JSON only in the documented `1.0` manifest format. The manifest can propose topics, file resources, HTTP(S) problem links, descriptions, difficulty, estimated time, research metadata, and evidence-based item prerequisites.
+
+In Just Start, choose **AI bulk intake**, select the manifest JSON, select the matching source files, choose an existing or new focus area, and review the summary before importing. Invalid manifests are rejected with field-level errors; missing source files prevent approval. The app then creates the topics and resources, uploads files to private Supabase Storage when signed in, and keeps ordinary URLs as links. This Phase 1 flow intentionally keeps the AI outside the database: the agent prepares a portable bundle, while Just Start validates and commits it.
 
 ## Requirements
 
