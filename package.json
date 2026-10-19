@@ -7,6 +7,7 @@
   "engines": {
     "node": ">=22 <23"
   },
+  "packageManager": "npm@10.9.9",
   "scripts": {
     "dev": "vite",
     "dev:network": "vite --host 0.0.0.0",
@@ -17,13 +18,13 @@
     "desktop:dev": "JUST_START_DEV_SERVER=1 electron ."
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "vite": "latest",
-    "vitest": "latest"
+    "@vitejs/plugin-react": "6.1.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "devDependencies": {
-    "electron": "^44.9.0"
+    "electron": "44.9.0"
   }
 }

@@ -55,7 +55,7 @@ Google Drive provides free quota within your account limits. This browser-only i
 ## Requirements
 
 - Node.js `22.23.3` (see `.nvmrc`)
-- npm 10+
+- npm `10.9.9` (also recorded in `package.json`)
 
 ## Setup
 
@@ -96,6 +96,16 @@ npm run build
 ```
 
 The generated `dist/` directory is static and can be hosted on a free static host such as Cloudflare Pages, GitHub Pages, or Netlify. Set `VITE_GOOGLE_CLIENT_ID` in that host's build environment and add the deployed HTTPS origin to the Google OAuth client. After deployment, the PWA can be opened from phone or laptop anywhere with an internet connection.
+
+## Deploy a static build
+
+1. Run `npm ci` with Node.js `22.23.3`.
+2. Set `VITE_GOOGLE_CLIENT_ID` in the deployment provider's build settings when Drive sync is wanted.
+3. Run `npm run build`.
+4. Publish the contents of `dist/` as the site's static files.
+5. Add the deployed HTTPS origin to the Google OAuth client's authorized JavaScript origins.
+
+The repository is intentionally self-contained for clean Linux rebuilds: `.nvmrc` pins Node.js, `package-lock.json` pins npm dependencies, `.env.example` documents configuration without secrets, `make test` is the single offline test entry point after `npm ci`, and `Dockerfile` builds and serves the static app.
 
 ## Desktop shell
 
