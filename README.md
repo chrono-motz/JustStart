@@ -5,7 +5,7 @@ Just Start is a local-first study and research companion that removes the blank-
 ## Current MVP
 
 - Modern, minimal launch screen with one recommended action.
-- Completion-aware prerequisite graph for course material.
+- Completion-aware prerequisite graph for course material, with a concise interactive visual map, progress-filled nodes, dependency arrows, click-to-inspect details, zoom, and drag-to-explore navigation.
 - Deadline, importance, unlock value, and startability influence selection.
 - Partial completion, done, skip, and “worked elsewhere” actions.
 - Sample Compiler Design and Operating Systems study data.

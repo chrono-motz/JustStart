@@ -11,6 +11,7 @@ import { isResearchResource, researchMetadataFromFile, researchNodeFields } from
 import { createDriveClient, DRIVE_APP_FOLDER_NAME } from './domain/drive.js'
 import { requestDriveAccess } from './domain/googleAuth.js'
 import { makeSyncEnvelope, mergeWorkspaces, normaliseSyncedWorkspace } from './domain/sync.js'
+import { buildGraphModel } from './domain/graph.js'
 import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -550,6 +551,10 @@ function App() {
   function selectProject(project) {
     setActiveProject(project)
     const selectedArea = focusAreas.find((focusArea) => focusArea.name === project)
+    if (screen === 'graph') {
+      setScreen('graph')
+      return
+    }
     setScreen(selectedArea?.mode === 'research' ? 'plan' : 'start')
   }
 
@@ -572,8 +577,8 @@ function App() {
           <button className={screen === 'plan' ? 'nav-item active' : 'nav-item'} onClick={() => setScreen('plan')}>
             <Icon name="layers" /> <span>My plan</span>
           </button>
-          <button className="nav-item" onClick={() => showNotice('The graph view is coming after the MVP.') }>
-            <Icon name="graph" /> <span>Graph</span><span className="soon-pill">soon</span>
+          <button className={screen === 'graph' ? 'nav-item active' : 'nav-item'} onClick={() => setScreen('graph')}>
+            <Icon name="graph" /> <span>Graph</span>
           </button>
         </nav>
 
@@ -654,8 +659,10 @@ function App() {
               <div className="today-card panel-card"><div className="panel-heading"><div><p className="overline">Today</p><h3>A little momentum</h3></div><span className="today-spark">✦</span></div><div className="stat-stack"><div className="stat-line"><span className="stat-number">{readyCount}</span><span><strong>ready to start</strong><small>after prerequisite checks</small></span></div><div className="stat-line"><span className="stat-number">{inProgressCount}</span><span><strong>in progress</strong><small>keep the thread warm</small></span></div><div className="stat-line"><span className="stat-number">{Math.max(0, projectNodes.length - completedCount)}</span><span><strong>still ahead</strong><small>no need to solve today</small></span></div></div><div className="tiny-tip"><span>✦</span><p><strong>Small is a strategy.</strong><br />A 10-minute start counts as a real start.</p></div></div>
             </section>
           </>
-        ) : (
+        ) : screen === 'plan' ? (
           <PlanScreen nodes={projectNodes} area={activeArea} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} onAddFiles={() => openImportModal()} onAddFolder={() => openImportModal({ mode: 'folder' })} onAddTopic={() => setTopicModalOpen(true)} onAddChild={(node) => openImportModal({ project: node.project, parentId: node.id })} onRemoveNode={removeNode} onRemoveProject={removeFocusArea} />
+        ) : (
+          <GraphScreen nodes={projectNodes} allProjects={allProjects} activeProject={activeProject} onProjectChange={(project) => { setActiveProject(project); setScreen('graph') }} onOpen={(node) => setPreviewNode(node)} onBack={() => setScreen('start')} />
         )}
       </main>
 
@@ -666,6 +673,93 @@ function App() {
       {topicModalOpen && <TopicModal focusAreas={focusAreas} nodes={nodes} activeProject={activeProject} onClose={() => setTopicModalOpen(false)} onCreate={createTopic} />}
     </div>
   )
+}
+
+function GraphScreen({ nodes, allProjects, activeProject, onProjectChange, onOpen, onBack }) {
+  const model = useMemo(() => buildGraphModel(nodes), [nodes])
+  const [selectedId, setSelectedId] = useState('')
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 20, y: 20 })
+  const dragRef = useRef(null)
+  const selectedNode = selectedId ? model.nodeById.get(selectedId) : null
+  const selectedGate = selectedNode ? getPrerequisiteStatus(selectedNode, nodes) : null
+  const connectedCount = model.edges.length
+  const averageProgress = model.nodes.length ? Math.round(model.nodes.reduce((sum, node) => sum + node.progress, 0) / model.nodes.length * 100) : 0
+
+  useEffect(() => {
+    setSelectedId('')
+    setZoom(1)
+    setPan({ x: 20, y: 20 })
+  }, [activeProject])
+
+  function startDrag(event) {
+    if (event.target.closest?.('.graph-node-card')) return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    dragRef.current = { x: event.clientX, y: event.clientY, pan }
+  }
+
+  function moveDrag(event) {
+    if (!dragRef.current) return
+    const start = dragRef.current
+    setPan({ x: start.pan.x + event.clientX - start.x, y: start.pan.y + event.clientY - start.y })
+  }
+
+  function stopDrag() {
+    dragRef.current = null
+  }
+
+  function changeZoom(amount) {
+    setZoom((current) => Math.max(0.55, Math.min(1.65, Number((current + amount).toFixed(2)))))
+  }
+
+  function resetView() {
+    setZoom(1)
+    setPan({ x: 20, y: 20 })
+  }
+
+  function edgePath(parent, child) {
+    const startX = parent.position.x + model.nodeWidth
+    const startY = parent.position.y + model.nodeHeight / 2
+    const endX = child.position.x
+    const endY = child.position.y + model.nodeHeight / 2
+    const bend = Math.max(35, (endX - startX) / 2)
+    return `M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`
+  }
+
+  return <section className="graph-screen">
+    <div className="graph-header">
+      <div><p className="overline">Visual map</p><h1>See how everything connects.</h1><p className="welcome-copy">A calm overview of your path. Click a topic for details, then drag the canvas when the map gets bigger.</p></div>
+      <div className="graph-header-actions"><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div>
+    </div>
+
+    <div className="graph-toolbar panel-card">
+      <label className="graph-scope"><span className="graph-toolbar-label">Map</span><select value={activeProject} onChange={(event) => onProjectChange(event.target.value)} aria-label="Choose a focus area for the graph">{allProjects.map((project) => <option key={project.name} value={project.name}>{project.name}</option>)}</select></label>
+      <div className="graph-stats"><span><strong>{model.nodes.length}</strong> topics</span><span><strong>{connectedCount}</strong> connections</span><span><strong>{averageProgress}%</strong> mapped progress</span></div>
+      <div className="graph-controls"><span className="graph-help">Drag to explore</span><button className="graph-control" onClick={() => changeZoom(-0.1)} aria-label="Zoom out">−</button><span className="zoom-label">{Math.round(zoom * 100)}%</span><button className="graph-control" onClick={() => changeZoom(0.1)} aria-label="Zoom in">+</button><button className="graph-reset" onClick={resetView}>Reset view</button></div>
+    </div>
+
+    <div className="graph-layout">
+      <aside className="graph-topic-panel panel-card">
+        <div className="graph-panel-heading"><div><p className="overline">Topics</p><h2>Choose a point</h2></div><span className="graph-topic-count">{model.nodes.length}</span></div>
+        {model.nodes.length ? <div className="graph-topic-list">{model.nodes.map((node) => <button key={node.id} className={selectedId === String(node.id) ? 'graph-topic active' : 'graph-topic'} onClick={() => setSelectedId(String(node.id))}><span className={`graph-topic-dot ${node.status === 'done' ? 'done' : node.progress > 0 ? 'current' : 'todo'}`} /><span className="graph-topic-name"><strong>{node.label}</strong><small>{Math.round(node.progress * 100)}% complete</small></span><span className="graph-topic-arrow">›</span></button>)}</div> : <div className="graph-empty-list"><span>○</span><p>No topics here yet.</p><small>Add a topic or resource to grow this map.</small></div>}
+      </aside>
+
+      <div className="graph-stage panel-card">
+        <div className="graph-stage-head"><span><span className="legend-dot done" /> complete <span className="legend-dot current" /> in motion <span className="legend-dot" /> not started</span><span>{model.nodes.length > 8 ? 'The map continues beyond the window.' : 'Dependencies flow left to right.'}</span></div>
+        <div className="graph-viewport" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onPointerLeave={stopDrag} onWheel={(event) => { event.preventDefault(); changeZoom(event.deltaY > 0 ? -0.08 : 0.08) }}>
+          {model.nodes.length ? <svg className="graph-svg" width={model.width} height={model.height} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }} role="img" aria-label="Topic dependency graph">
+            <defs><marker id="graph-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor" /></marker></defs>
+            <g className="graph-edges">{model.edges.map((edge) => { const parent = model.nodeById.get(edge.from); const child = model.nodeById.get(edge.to); return <path key={`${edge.from}-${edge.to}`} d={edgePath(parent, child)} className={parent.progress >= 1 ? 'graph-edge complete' : 'graph-edge'} markerEnd="url(#graph-arrow)" /> })}</g>
+            <g className="graph-nodes">{model.nodes.map((node) => <foreignObject key={node.id} x={node.position.x} y={node.position.y} width={model.nodeWidth} height={model.nodeHeight}><button className={`graph-node-card ${selectedId === String(node.id) ? 'selected' : ''} ${node.status === 'done' ? 'done' : node.progress > 0 ? 'current' : ''}`} onClick={() => setSelectedId(String(node.id))} onKeyDown={(event) => event.key === 'Enter' && setSelectedId(String(node.id))}>
+              <span className="graph-node-fill" style={{ width: `${node.progress * 100}%` }} /><span className="graph-node-top"><span className="graph-node-index">{node.eyebrow?.split('·')[1]?.trim() ?? '•'}</span><span>{node.status === 'done' ? 'done' : node.progress > 0 ? 'in motion' : 'next'}</span></span><strong>{node.label}</strong><span className="graph-node-progress"><span><span style={{ width: `${node.progress * 100}%` }} /></span><em>{Math.round(node.progress * 100)}%</em></span>
+            </button></foreignObject>)}</g>
+          </svg> : <div className="graph-stage-empty"><div className="empty-icon">+</div><h2>Your map starts with one topic.</h2><p>Choose another focus area or add a topic from My plan.</p></div>}
+        </div>
+      </div>
+
+      <aside className="graph-details panel-card">{selectedNode ? <><div className="graph-detail-top"><span className="focus-label"><span className="pulse-dot" /> Topic details</span><button className="modal-close" onClick={() => setSelectedId('')} aria-label="Close topic details">×</button></div><p className="modal-eyebrow">{selectedNode.eyebrow}</p><h2>{selectedNode.label}</h2><p className="graph-detail-description">{selectedNode.description || 'No description yet. Add a little context from My plan.'}</p><div className="graph-detail-progress"><div><strong>{Math.round(selectedNode.progress * 100)}%</strong><span>{selectedNode.status === 'done' ? 'complete' : selectedNode.progress ? 'in motion' : 'not started'}</span></div><div className="progress-track"><span style={{ width: `${selectedNode.progress * 100}%` }} /></div></div><div className="graph-detail-list"><div><span>Resource</span><strong>{resourceDescription(selectedNode)}</strong></div><div><span>Time</span><strong>{selectedNode.estimatedMinutes ?? 10} min</strong></div><div><span>Dependencies</span><strong>{selectedGate?.parents.length ? `${selectedGate.parents.length} prerequisite${selectedGate.parents.length === 1 ? '' : 's'}` : 'Independent topic'}</strong></div></div>{selectedGate?.blockedReasons?.length > 0 && <div className="graph-blocked-note"><Icon name="lock" /><span>{selectedGate.blockedReasons[0]}</span></div>}<button className="primary-button full-button" onClick={() => onOpen(selectedNode)}>Open focused view <Icon name="arrow" /></button></> : <div className="graph-detail-empty"><div className="graph-detail-orbit">✦</div><p className="overline">One click away</p><h2>Pick a topic to see its shape.</h2><p>Details stay quiet until you ask for them. Select a node from the map or list.</p></div>}</aside>
+    </div>
+  </section>
 }
 
 function PathRow({ node, nodes, onClick }) {
