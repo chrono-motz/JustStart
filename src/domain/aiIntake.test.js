@@ -70,6 +70,25 @@ describe('AI intake manifests', () => {
     expect(normalizeAIIntakeManifest(manifest).manifest.items[0].research).toEqual({ venue: 'PLDI' })
   })
 
+  it('preserves evidence-backed dependency details for the graph importer', () => {
+    const manifest = validManifest()
+    manifest.items[1].parents = [{
+      id: 'graph-intro',
+      threshold: 75,
+      confidence: 0.9,
+      reason: 'The search strategies page assumes the representations are understood first.',
+    }]
+    manifest.items[1].parentRule = 'ALL'
+    const result = normalizeAIIntakeManifest(manifest)
+    expect(result.manifest.items[1].parents).toEqual([{
+      id: 'graph-intro',
+      threshold: 0.75,
+      confidence: 0.9,
+      reason: 'The search strategies page assumes the representations are understood first.',
+    }])
+    expect(result.manifest.items[1].parentRule).toBe('ALL')
+  })
+
   it.each([
     ['schema version', () => ({ ...validManifest(), schemaVersion: '2.0' }), 'schemaVersion'],
     ['missing topics', () => ({ ...validManifest(), topics: [] }), 'topics'],
@@ -77,6 +96,7 @@ describe('AI intake manifests', () => {
     ['duplicate IDs', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], id: 'topic-graphs' }] }), 'duplicates ID'],
     ['missing topic reference', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], topicId: 'missing-topic' }] }), 'missing topic'],
     ['missing parent reference', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], parents: ['missing-item'] }] }), 'missing item'],
+    ['duplicate resource reference', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], id: 'graph-copy' }, { ...validManifest().items[1], resource: validManifest().items[0].resource }] }), 'may be imported once'],
     ['absolute path', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], resource: { type: 'file', path: '/etc/passwd' } }] }), 'must be relative'],
     ['path traversal', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], resource: { type: 'file', path: 'notes/../secret.pdf' } }] }), 'path traversal'],
     ['unsupported resource', () => ({ ...validManifest(), items: [{ ...validManifest().items[0], resource: { type: 'drive', id: 'abc' } }] }), 'unsupported'],

@@ -50,13 +50,13 @@ For local development, configure the Supabase Auth URL settings to allow the ori
 http://localhost:5173
 ```
 
-The same Supabase account can sign in from a phone and laptop, so progress and private resources can sync without being on the same Wi-Fi. Existing local folders must be selected once with **Add folder** so Just Start can upload them; a browser cannot scan private laptop folders automatically.
+The same Supabase account can sign in from a phone and laptop, so progress and private resources can sync without being on the same Wi-Fi. The app loads the workspace after sign-in, saves changes after a short debounce, and checks for changes on the other device every 30 seconds. Add the deployed site URL to Supabase Auth's allowed redirect URLs before testing magic links. Existing local folders must be selected once with **Add folder** so Just Start can upload them; a browser cannot scan private laptop folders automatically.
 
 ## AI Bulk Intake
 
-For large collections, download or copy `AI_IMPORT_INSTRUCTIONS.md` into the context you give to your own AI agent. Ask the agent to inspect the collection and return JSON only in the documented `1.0` manifest format. The manifest can propose topics, file resources, HTTP(S) problem links, descriptions, difficulty, estimated time, research metadata, and evidence-based item prerequisites.
+For large collections, open **AI bulk intake** and click **Download AGENTS.md**. Give that downloaded file to your own ChatGPT conversation together with the attached files, ZIP, folder structure, problem links, and YouTube links. Ask the agent to inspect the collection and return JSON only in the documented `1.0` manifest format. The manifest can propose topics, file resources, HTTP(S) problem links, descriptions, difficulty, estimated time, research metadata, and evidence-based item prerequisites, including confidence, thresholds, reasons, and `ALL`/`ANY` rules.
 
-In Just Start, choose **AI bulk intake**, select the manifest JSON, select the matching source files, choose an existing or new focus area, and review the summary before importing. Invalid manifests are rejected with field-level errors; missing source files prevent approval. The app then creates the topics and resources, uploads files to private Supabase Storage when signed in, and keeps ordinary URLs as links. This Phase 1 flow intentionally keeps the AI outside the database: the agent prepares a portable bundle, while Just Start validates and commits it.
+In Just Start, choose **AI bulk intake**, select the manifest JSON or a ZIP containing `manifest.json`, select or unpack the matching source files, choose an existing or new focus area, and review the summary before importing. Invalid manifests are rejected with field-level errors; missing source files prevent approval. Existing topics are matched by name instead of duplicated, existing resources are skipped by stable AI ID or source path/URL, and new topics are created only when they have new resources. The app then creates the new resources, preserves AI-provided dependency details in the graph, uploads files to private Supabase Storage when signed in, and keeps ordinary URLs as links. This Phase 1 flow intentionally keeps the AI outside the database: the agent prepares a portable bundle, while Just Start validates and commits it.
 
 To start fresh before a new collection, use **Clear resources** in the sidebar and confirm. This removes the current workspace nodes and, when signed in, attempts to remove their private Supabase Storage files too; it does not delete repository fixture files.
 
@@ -87,7 +87,9 @@ Run the app on the laptop with:
 npm run dev:network
 ```
 
-Find the laptop's local IP address, then open `http://<laptop-ip>:5173` on the phone. The phone and laptop must be on the same network and the laptop firewall must allow port `5173`. You can install the page as a PWA from the phone browser. Files can be added and opened from the phone itself; this browser MVP does not expose private laptop files directly to a phone.
+Find the laptop's local IP address, then open `http://<laptop-ip>:5173` on the phone. The phone and laptop must be on the same network and the laptop firewall must allow port `5173`. You can install the page as a PWA from the phone browser; the manifest includes an app icon. Files can be added and opened from the phone itself; this browser MVP does not expose private laptop files directly to a phone.
+
+The OmniRush sandbox is not the same network as your phone or laptop. A sandbox `localhost` URL cannot be used as a phone address. For a real two-device test, run Just Start on your laptop with `npm run dev:network`, or deploy `dist/` to a static host. For the anywhere workflow, deploy the static build, set the two Supabase variables in the host's build settings, add the deployed HTTPS URL to Supabase Auth, and open that same HTTPS URL on both devices. Sign in with the same email on both devices; local-only browser storage is intentionally not used as the cross-device source of truth.
 
 ## Test
 

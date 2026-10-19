@@ -236,6 +236,38 @@ function normalizeDifficulty(value, path, errors) {
   return DIFFICULTY_ALIASES.get(text(value).toLowerCase())
 }
 
+function normalizeFraction(value, path, errors, label) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    addError(errors, path, `must be a number from 0 to 1 (or 0 to 100 percent) when provided for ${label}.`)
+    return undefined
+  }
+  return value > 1 ? value / 100 : value
+}
+
+function normalizeParent(value, path, errors) {
+  if (typeof value === 'string') return normalizeId(value, path, errors)
+  if (!isPlainObject(value)) {
+    addError(errors, path, 'must be an item ID string or a dependency object.')
+    return ''
+  }
+  hasOnlyKeys(value, new Set(['id', 'nodeId', 'threshold', 'progressThreshold', 'confidence', 'reason']), errors, path)
+  const id = normalizeId(value.id ?? value.nodeId, `${path}.id`, errors)
+  const parent = { id }
+  if (value.threshold != null || value.progressThreshold != null) {
+    const threshold = normalizeFraction(value.threshold ?? value.progressThreshold, `${path}.threshold`, errors, 'threshold')
+    if (threshold != null) parent.threshold = threshold
+  }
+  if (value.confidence != null) {
+    const confidence = normalizeFraction(value.confidence, `${path}.confidence`, errors, 'confidence')
+    if (confidence != null) parent.confidence = confidence
+  }
+  if (value.reason != null) {
+    if (typeof value.reason !== 'string' || !text(value.reason)) addError(errors, `${path}.reason`, 'must be a non-empty string when provided.')
+    else parent.reason = text(value.reason)
+  }
+  return parent
+}
+
 function normalizeItem(value, index, errors) {
   const path = `items[${index}]`
   if (!isPlainObject(value)) {
@@ -243,7 +275,7 @@ function normalizeItem(value, index, errors) {
     return null
   }
   hasOnlyKeys(value, new Set([
-    'id', 'topicId', 'title', 'name', 'description', 'resource', 'parents',
+    'id', 'topicId', 'title', 'name', 'description', 'resource', 'parents', 'parentRule', 'progressThreshold',
     'estimatedMinutes', 'difficulty', 'research', 'researchMetadata', 'warnings',
   ]), errors, path)
   const id = normalizeId(value.id, `${path}.id`, errors)
@@ -258,11 +290,20 @@ function normalizeItem(value, index, errors) {
 
   if (value.parents != null) {
     if (!Array.isArray(value.parents)) {
-      addError(errors, `${path}.parents`, 'must be an array of item IDs when provided.')
+      addError(errors, `${path}.parents`, 'must be an array of item IDs or dependency objects when provided.')
     } else {
-      item.parents = value.parents.map((parent, parentIndex) => normalizeId(parent, `${path}.parents[${parentIndex}]`, errors))
-      if (new Set(item.parents).size !== item.parents.length) addError(errors, `${path}.parents`, 'must not contain duplicate parent IDs.')
+      item.parents = value.parents.map((parent, parentIndex) => normalizeParent(parent, `${path}.parents[${parentIndex}]`, errors))
+      const parentIds = item.parents.map((parent) => typeof parent === 'object' ? parent.id : parent)
+      if (new Set(parentIds).size !== parentIds.length) addError(errors, `${path}.parents`, 'must not contain duplicate parent IDs.')
     }
+  }
+  if (value.parentRule != null) {
+    if (value.parentRule !== 'ALL' && value.parentRule !== 'ANY') addError(errors, `${path}.parentRule`, 'must be `ALL` or `ANY` when provided.')
+    else item.parentRule = value.parentRule
+  }
+  if (value.progressThreshold != null) {
+    const threshold = normalizeFraction(value.progressThreshold, `${path}.progressThreshold`, errors, 'progress threshold')
+    if (threshold != null) item.progressThreshold = threshold
   }
   if (value.estimatedMinutes != null) {
     if (!Number.isInteger(value.estimatedMinutes) || value.estimatedMinutes <= 0) addError(errors, `${path}.estimatedMinutes`, 'must be a positive integer.')
@@ -293,8 +334,20 @@ function checkReferences(manifest, errors) {
   manifest.items.forEach((item, index) => {
     if (item.topicId && !topicIds.has(item.topicId)) addError(errors, `items[${index}].topicId`, `references missing topic \`${item.topicId}\`; add that topic or correct the ID.`)
     for (const parent of item.parents || []) {
-      if (!itemIds.has(parent)) addError(errors, `items[${index}].parents`, `references missing item \`${parent}\`; parent IDs must name another item.`)
-      if (parent === item.id) addError(errors, `items[${index}].parents`, 'cannot include the item itself as a parent.')
+      const parentId = typeof parent === 'object' ? parent.id : parent
+      if (!itemIds.has(parentId)) addError(errors, `items[${index}].parents`, `references missing item \`${parentId}\`; parent IDs must name another item.`)
+      if (parentId === item.id) addError(errors, `items[${index}].parents`, 'cannot include the item itself as a parent.')
+    }
+  })
+
+  const resourceReferences = new Map()
+  manifest.items.forEach((item, index) => {
+    if (!item.resource) return
+    const reference = item.resource.type === 'url' ? `url:${item.resource.url}` : `file:${item.resource.path}`
+    if (resourceReferences.has(reference)) {
+      addError(errors, `items[${index}].resource`, `duplicates the resource reference used by items[${resourceReferences.get(reference)}]; each source file or URL may be imported once.`)
+    } else {
+      resourceReferences.set(reference, index)
     }
   })
 
@@ -306,7 +359,10 @@ function checkReferences(manifest, errors) {
     if (visited.has(id)) return false
     visiting.add(id)
     const item = byId.get(id)
-    const cycle = item?.parents?.some((parent) => byId.has(parent) && visit(parent))
+    const cycle = item?.parents?.some((parent) => {
+      const parentId = typeof parent === 'object' ? parent.id : parent
+      return byId.has(parentId) && visit(parentId)
+    })
     visiting.delete(id)
     visited.add(id)
     return cycle

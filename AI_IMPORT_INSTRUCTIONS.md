@@ -75,7 +75,16 @@ these supported fields:
         "label": "Optional display label",
         "mimeType": "application/pdf"
       },
-      "parents": ["another-item-id"],
+      "parents": [
+        {
+          "id": "another-item-id",
+          "threshold": 0.75,
+          "confidence": 0.92,
+          "reason": "This lecture introduces parsing after lexical analysis."
+        }
+      ],
+      "parentRule": "ALL",
+      "progressThreshold": 0.65,
       "estimatedMinutes": 25,
       "difficulty": "intermediate",
       "research": {
@@ -113,9 +122,13 @@ the inputs. Follow these rules exactly:
 5. URL resources must use only `http` or `https` and must not contain a
    username, password, API key, token, or other credentials. This includes
    YouTube links.
-6. `parents`, when present, contains existing item IDs. A parent cannot be the
-   item itself, and prerequisite relationships must not form a cycle. Only add
-   prerequisites supported by the source collection; otherwise omit `parents`.
+6. `parents`, when present, contains existing item IDs or dependency objects.
+   An object may include `id`, `threshold`, `confidence`, and `reason`.
+   `threshold` and `confidence` use 0..1 (percent values from 0..100 are also
+   accepted). `parentRule` is optional and must be `ALL` or `ANY`; the default
+   is `ALL`. A parent cannot be the item itself, and prerequisite relationships
+   must not form a cycle. Only add prerequisites supported by the source
+   collection; otherwise omit `parents`.
 7. `estimatedMinutes`, when present, is a positive integer. `difficulty`, when
    present, is one of `beginner`, `intermediate`, `advanced`, or `expert`.
 8. `description`, `research`, and `warnings` are optional. Warnings must be
