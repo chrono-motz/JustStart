@@ -7,6 +7,26 @@ links, YouTube URLs, paper citations, or a mixture of all of these. Inspect the
 inputs that are actually attached or written in the conversation; do not claim
 to have opened a file, visited a link, or read a paper that is not available.
 
+## Required result: create a file
+
+Your primary job is to **create a downloadable file**, not to print the JSON in
+the chat response.
+
+1. Analyze the supplied attachments, archive, folder structure, and links.
+2. Create a file named exactly `manifest.json` containing the completed Just
+   Start manifest described below. If the chat supports a workspace or output
+   folder, save it as `just-start-import/manifest.json`.
+3. Validate the file before returning: it must be valid JSON and follow every
+   rule in this document.
+4. Attach the created `manifest.json` as a downloadable file in your response.
+   A short response such as `manifest.json is ready to download.` is enough.
+5. Do **not** paste the full JSON into the chat, do not wrap it in Markdown
+   fences, and do not replace the file with a prose summary.
+
+If file creation or attachment is unavailable in the current AI conversation,
+say that a downloadable file could not be created and ask the user to enable a
+file/output tool. Do not dump the full manifest into the chat as a fallback.
+
 Your task is to prepare a small, reviewable study or research collection for
 Just Start. Group related sources into useful topics and turn each usable
 source into one item. Preserve useful source names and URLs so the person can
@@ -47,11 +67,11 @@ match the manifest to the files selected in Just Start.
   it. If a source cannot be safely matched to an attached path or real URL,
   omit it or explain the uncertainty in the manifest-level `warnings` array.
 
-## Output contract
+## Output contract for `manifest.json`
 
-Return **JSON only**. Do not use Markdown fences, headings, comments, prose,
-or a preamble before or after the JSON. The top-level object must have exactly
-these supported fields:
+The **contents of the created file** must be JSON only. Do not put Markdown
+fences, headings, comments, prose, or a preamble in the file. The top-level
+object must have exactly these supported fields:
 
 ```json
 {
@@ -140,5 +160,6 @@ the inputs. Follow these rules exactly:
    path exists in the supplied folder structure or attachments and that every
    URL is copied accurately before responding.
 
-Return the completed Just Start manifest as one valid JSON object and nothing
-else.
+Save the completed Just Start manifest as `manifest.json` and attach that file.
+In the chat message, provide only a short confirmation and the download. Never
+paste the full manifest into the conversation.

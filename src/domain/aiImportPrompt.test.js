@@ -4,13 +4,17 @@ import { describe, expect, it } from 'vitest'
 const prompt = readFileSync(new URL('../../AI_IMPORT_INSTRUCTIONS.md', import.meta.url), 'utf8')
 
 describe('AI intake prompt contract', () => {
-  it('is self-contained and requests a JSON-only Just Start manifest', () => {
+  it('is self-contained and requires a downloadable manifest file', () => {
     expect(prompt).toContain('# Just Start AI intake instructions')
     expect(prompt).toContain('Copy this entire document into a ChatGPT conversation')
     expect(prompt).toContain('or a plain-text folder structure')
-    expect(prompt).toContain('Return **JSON only**')
+    expect(prompt).toContain('create a downloadable file')
+    expect(prompt).toContain('manifest.json')
+    expect(prompt).toContain('Attach the created `manifest.json` as a downloadable file')
+    expect(prompt).toContain('Do not paste the full JSON into the chat')
     expect(prompt).toContain('"schemaVersion": "1.0"')
-    expect(prompt).toContain('Do not use Markdown fences, headings, comments, prose')
+    expect(prompt).toContain('The **contents of the created file** must be JSON only')
+    expect(prompt).not.toContain('Return **JSON only**')
   })
 
   it.each([
