@@ -97,7 +97,7 @@ does require the laptop to run the development server; production does not.
 - Completion-aware recommendations.
 - Deadline and prerequisite tracking.
 - Interactive dependency graph.
-- AI Bulk Intake for folders, ZIPs, files, links, papers, and YouTube URLs.
+- Smart Import for folders, ZIPs, files, links, papers, and YouTube URLs.
 - Downloadable `AGENTS.md` and `JUSTSTART_CONTEXT.json`.
 - Safe browser ZIP unpacking with path-traversal protection.
 - Supabase email sign-in, workspace sync, and private resource storage.
@@ -174,7 +174,7 @@ installed. The project also includes:
 1. Start on **Start** and show the recommended next action.
 2. Open **Graph** and drag/zoom through the dependency map.
 3. Click a node to show progress, deadline/resource details, and prerequisites.
-4. Open **AI bulk intake** and download `AGENTS.md` plus `JUSTSTART_CONTEXT.json`.
+4. Open **Smart import** and download `AGENTS.md` plus `JUSTSTART_CONTEXT.json`.
 5. Show the compact resource card instead of the old empty preview.
 6. Open **Sign in to sync** and explain that the same workspace works on phone and laptop.
 
