@@ -1,7 +1,7 @@
 {
   "name": "Just Start",
   "short_name": "Just Start",
-  "description": "A local-first study and research library for the device you are using.",
+  "description": "An AI-assisted, cloud-synced workspace for instantly starting useful study and research.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f6f7fb",

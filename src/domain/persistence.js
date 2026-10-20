@@ -1,4 +1,4 @@
-/** The local-storage slot used by the browser MVP workspace. */
+/** The local-storage slot used for fast local fallback and offline continuity. */
 export const STORAGE_KEY = 'just-start.workspace'
 
 /** Increment when the persisted workspace envelope changes shape. */
@@ -33,7 +33,7 @@ export function loadWorkspace(storage, fallback) {
 
 /**
  * Write a versioned workspace envelope without making persistence a hard
- * requirement for the browser MVP.
+ * requirement for the browser fallback.
  */
 export function saveWorkspace(storage, workspace) {
   try {

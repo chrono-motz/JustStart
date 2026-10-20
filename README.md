@@ -1,165 +1,182 @@
 # Just Start
 
-> Reducing Friction by instantly starting.
+> **Reducing Friction by instantly starting.**
 
-Just Start is a cloud-synced, AI-assisted study and research workspace. It turns a large, messy collection of notes, slides, papers, problem links, videos, and question packs into organized topics, a completion-aware learning path, and a visual dependency graph that works across laptop and phone.
+Just Start is a cloud-synced, AI-assisted learning workspace that turns a
+messy collection of resources into a clear next step.
 
-## Why it exists
+## The idea
 
-Most learning tools make people plan, classify, and upload resources before they can begin. Just Start removes that setup burden: users can import an entire collection, let their own AI prepare a structured manifest, review the result, and immediately see the next useful action.
+Learning usually fails before the learning begins: too many files, unclear
+priorities, forgotten deadlines, and no confidence about what to do next.
 
-## Buildathon highlights
+```mermaid
+flowchart LR
+  A[Large collection] --> B[AI intake]
+  B --> C[Topics + links + dependencies]
+  C --> D[Progress graph]
+  D --> E[One useful next start]
+  E --> F[Momentum]
+  F --> D
+```
 
-- **Instant start:** completion-aware recommendations turn a large plan into one useful next step.
-- **Interactive graph:** dependencies become a calm, navigable map with progress-filled nodes, arrows, zoom, drag, and click-to-inspect details.
-- **AI Bulk Intake:** ChatGPT can inspect a full folder or ZIP and create a downloadable `manifest.json` instead of forcing users to add resources one by one.
-- **Incremental imports:** download `AGENTS.md` and `JUSTSTART_CONTEXT.json`; existing topics and resources are reused or skipped while only new material is added.
-- **Broad resource support:** PDFs, slides, documents, papers, question packs, problem links, YouTube links, and other files.
-- **Cloud workspace:** Supabase Auth, Postgres, and private Storage keep the same workspace available across devices.
-- **Deployable anywhere:** Vercel hosts the static frontend; the laptop does not need to stay on after deployment.
-- **Safe fallback:** local browser persistence keeps the app usable before sign-in or during a temporary cloud failure.
+Just Start reduces the setup resistance **and** keeps the user moving:
 
-## Current MVP
+- **Less friction:** import a whole folder or ZIP instead of adding resources one by one.
+- **More awareness:** deadlines, importance, unlock value, startability, and prerequisites influence the next recommendation.
+- **A little spark:** the user does not have to decide everything. The app reveals one useful next action.
+- **Visible progress:** completion fills the graph and makes dependencies understandable.
+- **Cloud continuity:** the same workspace follows the user between laptop and phone.
 
-- Modern, minimal launch screen with one recommended action.
-- Completion-aware prerequisite graph for course material, with a concise interactive visual map, progress-filled nodes, dependency arrows, click-to-inspect details, zoom, and drag-to-explore navigation.
-- Deadline, importance, unlock value, and startability influence selection.
-- Partial completion, done, skip, and “worked elsewhere” actions.
-- Sample Compiler Design and Operating Systems study data.
-- Sample question files in `SampleQuestions/` for later quiz generation and import testing.
-- Local browser preview for the sample resource cards.
-- Local progress persistence through browser storage.
-- Installable browser manifest for a distraction-free standalone window.
-- Persisted light/dark mode from the sidebar.
-- Optional Supabase cloud sync for the same workspace, files, and completions on phone and laptop.
-- AI Bulk Intake for importing a validated collection of topics, local files, and problem links in one reviewable pass.
-- Add files or whole folders with any file extension; imported resources are automatically classified and added as concise plan nodes.
-- Create new focus areas and topics, attach imported children to an existing topic, and remove topics or whole focus areas as plans change.
-- Import compact JSON or Markdown question packs with optional answers and worked solutions; see `QuestionPacks/README.md`.
-- Create a Research Library focus area. Research PDFs and citation files are grouped by broad topic without prerequisite gates; filename metadata such as title, author pattern, year, and DOI is inferred locally.
+## What the experience looks like
 
-The browser/PWA is the primary experience, and a small Electron shell provides native resource opening and login auto-start. The Auto-start switch controls the opening screen in the browser and also updates OS login auto-start when running in Electron. Use the **Dark mode** control in the sidebar to switch themes; the preference is stored locally. On a phone, use **Add resources** or **Add folder** for files available on that phone; after cloud upload, the same resources can be accessed from another device.
+### 1. Start with one useful action
 
-Research is intentionally a different mode from coursework: it is a shelf for broad reading and triage, not a directed learning graph. Later work can add DOI/API enrichment, duplicate detection, paper notes, reading queues, and citation links without changing the study graph semantics.
+The Start screen surfaces a recommended resource instead of an intimidating
+plan. It considers urgency, importance, prerequisite state, and expected
+unlock value, then gives the user a clear action to begin.
 
-Use **Add resources** for individual files or **Add folder** in **My plan** for a directory. The picker accepts all file types. On phone or desktop, add files from the device where they are available; files left only on another device must be moved or added there first. Large collections are kept concise: the plan initially shows eight resources per focus area and offers a “show more” control rather than rendering hundreds at once. Without cloud sync, imported browser files are available immediately in the current session and must be added again after a reload because object URLs are temporary. After signing in to Supabase, the workspace is stored in Postgres and uploaded resources are stored in a private Storage bucket.
+### 2. See the shape of the work
 
-## Supabase cloud sync
+The Graph view shows:
 
-Supabase is optional. Without configuration, Just Start remains local-only. With it, click **Sign in to sync** in the sidebar and request a passwordless email link. Supabase provides authentication, Postgres workspace storage, and private file storage without requiring a custom backend for this browser app.
+- Nodes connected by prerequisite arrows.
+- Independent topics grouped without artificial links.
+- Progress-filled nodes.
+- Click-to-inspect details.
+- Drag and zoom for large collections.
 
-Create a Supabase project, run `supabase/schema.sql` in the Supabase SQL Editor, and put only the browser-safe project settings in a local `.env` file:
+### 3. Track without micromanaging
+
+Users can mark work partially done, complete, skipped, or completed elsewhere.
+The app keeps the path honest while preserving momentum.
+
+### 4. Let AI handle the boring first pass
+
+Download these two files from the app:
+
+```text
+AGENTS.md
+JUSTSTART_CONTEXT.json
+```
+
+Give them to ChatGPT together with the user's main folder or ZIP. ChatGPT
+creates and attaches a downloadable `manifest.json` containing only new
+resources, new topics when needed, and evidence-backed dependencies.
+
+```mermaid
+flowchart LR
+  A[AGENTS.md] --> C[ChatGPT]
+  B[JUSTSTART_CONTEXT.json] --> C
+  D[main-folder.zip] --> C
+  C --> E[downloadable manifest.json]
+  E --> F[Just Start review]
+  F --> G[Import new material]
+```
+
+The importer validates paths, URLs, IDs, missing references, cycles, and
+duplicate resources before anything is added. Existing topics and resources
+are reused or skipped.
+
+### 5. Sign in once, continue anywhere
+
+Email magic-link sign-in connects the workspace to Supabase:
+
+```mermaid
+flowchart LR
+  P[Phone] --> V[Vercel-hosted app]
+  L[Laptop] --> V
+  V --> S[Supabase Auth + Postgres + private Storage]
+```
+
+After deployment, the laptop does **not** need to stay on. Local development
+does require the laptop to run the development server; production does not.
+
+## Included features
+
+- Completion-aware recommendations.
+- Deadline and prerequisite tracking.
+- Interactive dependency graph.
+- AI Bulk Intake for folders, ZIPs, files, links, papers, and YouTube URLs.
+- Downloadable `AGENTS.md` and `JUSTSTART_CONTEXT.json`.
+- Safe browser ZIP unpacking with path-traversal protection.
+- Supabase email sign-in, workspace sync, and private resource storage.
+- Responsive PWA experience for phone and laptop.
+- Dark mode, local fallback, and an Electron desktop shell.
+
+## Quick start
+
+Requirements: Node.js `22.23.3` and npm `10.9.9`.
 
 ```bash
+npm ci
 cp .env.example .env
+npm run dev
 ```
+
+Open the URL printed by Vite.
+
+For phone testing on the same Wi-Fi:
+
+```bash
+npm run dev:network
+```
+
+Open `http://<laptop-ip>:5173` on the phone. This local URL requires the
+laptop to remain on.
+
+## Supabase configuration
+
+Run `supabase/schema.sql` in the Supabase SQL Editor, then put only these
+browser-safe values in `.env`:
 
 ```env
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 ```
 
-The publishable key is safe to expose in the browser when the included Row Level Security policies are installed. Never put a Supabase secret/service-role key in `.env`, source code, Vite client configuration, or the repository. Each self-hosting user can create their own Supabase project and provide their own URL and publishable key.
+Never put a Supabase secret/service-role key in the frontend or repository.
+The `.env` file is ignored; `.env.example` is safe to commit.
 
-For local development, configure the Supabase Auth URL settings to allow the origin where the app is running, for example:
+## Deploy for laptop-off phone access
 
-```text
-http://localhost:5173
-```
+Vercel free is sufficient:
 
-The same Supabase account can sign in from a phone and laptop, so progress and private resources can sync without being on the same Wi-Fi. The app loads the workspace after sign-in, saves changes after a short debounce, and checks for changes on the other device every 30 seconds. Add the deployed site URL to Supabase Auth's allowed redirect URLs before testing magic links. Existing local folders must be selected once with **Add folder** so Just Start can upload them; a browser cannot scan private laptop folders automatically.
+1. Push the `main` branch to GitHub.
+2. Import the repository into Vercel.
+3. Use `npm ci` as the install command.
+4. Use `npm run build` as the build command.
+5. Use `dist` as the output directory.
+6. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in Vercel.
+7. Add the Vercel HTTPS URL to Supabase Auth's allowed URLs.
 
-## AI Bulk Intake
+Then open the same Vercel URL on the phone and laptop and sign in with the
+same email. Supabase provides the shared data while Vercel provides the app.
 
-For large collections, open **AI bulk intake** and click **Download AGENTS.md**. Give that downloaded file to your own ChatGPT conversation together with the attached files, ZIP, folder structure, problem links, and YouTube links. Ask the agent to inspect the collection and return JSON only in the documented `1.0` manifest format. The manifest can propose topics, file resources, HTTP(S) problem links, descriptions, difficulty, estimated time, research metadata, and evidence-based item prerequisites, including confidence, thresholds, reasons, and `ALL`/`ANY` rules.
-
-In Just Start, choose **AI bulk intake**, select the manifest JSON or a ZIP containing `manifest.json`, select or unpack the matching source files, choose an existing or new focus area, and review the summary before importing. Invalid manifests are rejected with field-level errors; missing source files prevent approval. Existing topics are matched by name instead of duplicated, existing resources are skipped by stable AI ID or source path/URL, and new topics are created only when they have new resources. The app then creates the new resources, preserves AI-provided dependency details in the graph, uploads files to private Supabase Storage when signed in, and keeps ordinary URLs as links. This Phase 1 flow intentionally keeps the AI outside the database: the agent prepares a portable bundle, while Just Start validates and commits it.
-
-To start fresh before a new collection, use **Clear resources** in the sidebar and confirm. This removes the current workspace nodes and, when signed in, attempts to remove their private Supabase Storage files too; it does not delete repository fixture files.
-
-## Requirements
-
-- Node.js `22.23.3` (see `.nvmrc`)
-- npm `10.9.9` (also recorded in `package.json`)
-
-## Setup
-
-```bash
-npm ci
-```
-
-## Run
-
-```bash
-npm run dev
-```
-
-Open the local URL printed by Vite.
-
-## Phone access on the same Wi-Fi
-
-Run the app on the laptop with:
-
-```bash
-npm run dev:network
-```
-
-Find the laptop's local IP address, then open `http://<laptop-ip>:5173` on the phone. The phone and laptop must be on the same network and the laptop firewall must allow port `5173`. You can install the page as a PWA from the phone browser; the manifest includes an app icon. Files can be added and opened from the phone itself; this browser MVP does not expose private laptop files directly to a phone.
-
-The OmniRush sandbox is not the same network as your phone or laptop. A sandbox `localhost` URL cannot be used as a phone address. Running `npm run dev:network` is only a local development test, so the laptop must stay on for that URL to work. Supabase does not host the Vite website; it hosts the account, workspace database, and private files. For the actual phone-and-laptop workflow when the laptop may be off, deploy `dist/` to a static host such as Cloudflare Pages, Netlify, GitHub Pages, or Vercel. Set the two Supabase variables in that host's build settings, add the deployed HTTPS URL to Supabase Auth, and open that same HTTPS URL on both devices. Sign in with the same email on both devices; the deployed site loads from the static host while Supabase supplies the shared data.
-
-## Test
+## Build and test
 
 ```bash
 make test
-```
-
-The test command is offline after dependencies have been installed.
-
-## Build
-
-```bash
 npm run build
 ```
 
-The generated `dist/` directory is static and can be hosted on a free static host such as Cloudflare Pages, GitHub Pages, or Netlify. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in that host's build environment and add the deployed HTTPS origin to Supabase Auth's allowed URL list. After deployment, the PWA can be opened from phone or laptop anywhere with an internet connection.
+`make test` is the single offline test command after dependencies are
+installed. The project also includes:
 
-## Deploy a static build
+- `package-lock.json` for reproducible npm installs.
+- `.nvmrc` for the pinned Node runtime.
+- `Dockerfile` for clean Linux builds and serving.
+- `.env.example` without secrets.
+- No machine-specific absolute paths.
 
-1. Run `npm ci` with Node.js `22.23.3`.
-2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in the deployment provider's build settings when cloud sync is wanted.
-3. Run `npm run build`.
-4. Publish the contents of `dist/` as the site's static files.
-5. Add the deployed HTTPS origin to Supabase Auth's allowed URL list.
+## Recording a short demo
 
-The repository is intentionally self-contained for clean Linux rebuilds: `.nvmrc` pins Node.js, `package-lock.json` pins npm dependencies, `.env.example` documents configuration without secrets, `make test` is the single offline test entry point after `npm ci`, and `Dockerfile` builds and serves the static app.
+1. Start on **Start** and show the recommended next action.
+2. Open **Graph** and drag/zoom through the dependency map.
+3. Click a node to show progress, deadline/resource details, and prerequisites.
+4. Open **AI bulk intake** and download `AGENTS.md` plus `JUSTSTART_CONTEXT.json`.
+5. Show the compact resource card instead of the old empty preview.
+6. Open **Sign in to sync** and explain that the same workspace works on phone and laptop.
 
-## Desktop shell
-
-Build the renderer and launch the Electron shell against the built `dist/index.html`:
-
-```bash
-npm run build
-npm run desktop
-```
-
-For desktop development, start Vite in one terminal and Electron in another. The shell will load `http://localhost:5173` when `JUST_START_DEV_SERVER=1`:
-
-```bash
-# terminal 1
-npm run dev
-
-# terminal 2
-npm run desktop:dev
-```
-
-The shell keeps renderer JavaScript isolated from Node.js and exposes only `window.justStart.openResource(path)` and `window.justStart.setLoginAutoStart(enabled)`. Resource paths are checked to stay inside the app before Electron opens them with the operating system. On Linux, enabling login auto-start writes a user-level `just-start.desktop` file to `~/.config/autostart/`; Electron's login item API is used where supported.
-
-## Docker
-
-```bash
-docker build -t just-start .
-docker run --rm -p 4173:4173 just-start
-```
-
-Open `http://localhost:4173`.
+The message of the demo is simple: **remove the friction, reveal the next
+start, and keep the momentum visible.**
