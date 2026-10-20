@@ -68,6 +68,10 @@ function comparableTopicTitle(value) {
   return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ')
 }
 
+function isImportedTopicPlaceholder(node) {
+  return Boolean(node?.kind?.includes('topic') && (node.aiTopicId || node.id?.startsWith('ai-topic-') || node.resource?.source === 'ai-intake'))
+}
+
 function importedResourceKey(resource) {
   if (!resource) return ''
   if (resource.url) return `url:${String(resource.url).trim()}`
@@ -132,7 +136,7 @@ function readStoredWorkspace() {
       ? storedProjects
       : [...storedProjects, researchLibrary]
   return {
-    nodes: storedNodes.map((node) => {
+    nodes: storedNodes.filter((node) => !isImportedTopicPlaceholder(node)).map((node) => {
       if (!node?.resource?.temporary || !/^blob:/i.test(node.resource.path ?? '')) return node
       const { path: _temporaryPath, ...resource } = node.resource
       return { ...node, resource: { ...resource, unavailable: true } }
@@ -715,7 +719,7 @@ function App() {
         existingItemUpdates.set(existing.id, { ...existing, aiItemId: item.id, project: topicRecord.projectName, topic: item.topicId, topicTitle: topicRecord.title, eyebrow: `${topicRecord.projectName} · AI item` })
       }
     }
-    const importedTopicNodeIds = new Set(nodes.filter((node) => node.kind?.includes('topic') && (node.aiTopicId || node.id?.startsWith('ai-topic-') || node.resource?.source === 'ai-intake')).map((node) => node.id))
+    const importedTopicNodeIds = new Set(nodes.filter(isImportedTopicPlaceholder).map((node) => node.id))
     const manifestProjectNames = new Set([...topicsById.values()].map(({ projectName }) => comparableTopicTitle(projectName)))
     setFocusAreas((current) => {
       const next = new Map(current.map((focusArea) => [comparableTopicTitle(focusArea.name), focusArea]))
