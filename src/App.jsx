@@ -612,7 +612,6 @@ function App() {
     const existingResources = new Set()
     const existingResourceNodes = new Map()
     const existingAIItems = new Map()
-    const existingTopicNodes = new Map()
     for (const node of nodes) {
       const key = importedResourceKey(node.resource)
       if (key) {
@@ -620,7 +619,6 @@ function App() {
         existingResourceNodes.set(key, node)
       }
       if (node.aiItemId) existingAIItems.set(node.aiItemId, node)
-      if (node.topic && node.kind?.includes('topic')) existingTopicNodes.set(node.topic, node)
     }
 
     const newItems = []
@@ -636,40 +634,17 @@ function App() {
       newItems.push(item)
     }
 
-    const topicNodes = []
     const topicsById = new Map()
-    const existingNodeUpdates = new Map()
     const existingItemUpdates = new Map()
     const topicsNeeded = new Set(aiImportManifest.manifest.items.map((item) => item.topicId))
-    for (const [index, topic] of aiImportManifest.manifest.topics.entries()) {
+    for (const topic of aiImportManifest.manifest.topics) {
       if (!topicsNeeded.has(topic.id)) continue
       const topicItems = aiImportManifest.manifest.items.filter((item) => item.topicId === topic.id)
       const matchingFocusArea = focusAreas.find((focusArea) => comparableTopicTitle(focusArea.name) === comparableTopicTitle(topic.title))
       const topicMode = matchingFocusArea?.mode || (topicItems.length > 0 && topicItems.every((item) => item.research) ? 'research' : inferredMode)
       const projectName = matchingFocusArea?.name || topic.title
-      const existing = existingTopicNodes.get(topic.id) || nodes.find((node) => node.kind?.includes('topic') && comparableTopicTitle(node.title) === comparableTopicTitle(topic.title))
       const focusArea = matchingFocusArea || { name: projectName, color: topicMode === 'research' ? 'blue' : 'violet', mode: topicMode }
-      const baseNode = existing || {
-        id: `ai-topic-${topic.id}`,
-        project: projectName,
-        kind: topicMode === 'research' ? 'research-topic' : 'topic',
-        topic: topic.id,
-        aiTopicId: topic.id,
-        title: topic.title,
-        eyebrow: `${projectName} · AI topic ${String(index + 1).padStart(2, '0')}`,
-        description: topic.description || `AI-imported topic in ${projectName}.`,
-        resource: { type: 'other', label: 'AI topic', source: 'ai-intake' },
-        progress: 0,
-        status: 'todo',
-        importance: 0.6,
-        unlockValue: 0.6,
-        startability: 0.75,
-        estimatedMinutes: 15,
-      }
-      const node = { ...baseNode, project: projectName, topic: topic.id, aiTopicId: topic.id, kind: topicMode === 'research' ? 'research-topic' : 'topic' }
-      if (existing) existingNodeUpdates.set(existing.id, node)
-      else topicNodes.push(node)
-      topicsById.set(topic.id, { node, projectName, mode: topicMode, focusArea })
+      topicsById.set(topic.id, { title: topic.title, projectName, mode: topicMode, focusArea })
     }
 
     const itemIds = new Map()
@@ -703,7 +678,8 @@ function App() {
         topic: item.topicId,
         title: item.title,
         eyebrow: `${topicRecord.projectName} · AI item`,
-        description: item.description || `AI-imported resource under ${topicRecord.node.title}.`,
+        description: item.description || `AI-imported resource under ${topicRecord.title}.`,
+        topicTitle: topicRecord.title,
         resource,
         progress: 0,
         status: 'todo',
@@ -736,19 +712,24 @@ function App() {
       const existing = existingAIItems.get(item.id) || existingResourceNodes.get(item.resource.type === 'url' ? `url:${item.resource.url}` : `file:${item.resource.path}`)
       const topicRecord = topicsById.get(item.topicId)
       if (existing && topicRecord) {
-        existingItemUpdates.set(existing.id, { ...existing, aiItemId: item.id, project: topicRecord.projectName, topic: item.topicId, eyebrow: `${topicRecord.projectName} · AI item` })
+        existingItemUpdates.set(existing.id, { ...existing, aiItemId: item.id, project: topicRecord.projectName, topic: item.topicId, topicTitle: topicRecord.title, eyebrow: `${topicRecord.projectName} · AI item` })
       }
     }
+    const importedTopicNodeIds = new Set(nodes.filter((node) => node.kind?.includes('topic') && (node.aiTopicId || node.id?.startsWith('ai-topic-') || node.resource?.source === 'ai-intake')).map((node) => node.id))
+    const manifestProjectNames = new Set([...topicsById.values()].map(({ projectName }) => comparableTopicTitle(projectName)))
     setFocusAreas((current) => {
       const next = new Map(current.map((focusArea) => [comparableTopicTitle(focusArea.name), focusArea]))
       for (const { focusArea } of topicsById.values()) next.set(comparableTopicTitle(focusArea.name), focusArea)
-      const legacyImportedNodes = nodes.filter((node) => node.project === 'Imported collection' && (node.aiItemId || node.topic || node.resource?.source === 'ai-intake'))
-      if (legacyImportedNodes.length && legacyImportedNodes.every((node) => existingNodeUpdates.has(node.id) || existingItemUpdates.has(node.id))) {
-        next.delete(comparableTopicTitle('Imported collection'))
+      const legacyImportedNodes = nodes.filter((node) => node.aiItemId || node.aiTopicId || node.resource?.source === 'ai-intake')
+      const legacyProjects = new Set(legacyImportedNodes.map((node) => node.project))
+      for (const legacyProject of legacyProjects) {
+        const projectNodes = nodes.filter((node) => node.project === legacyProject)
+        const migrated = projectNodes.length > 0 && projectNodes.every((node) => importedTopicNodeIds.has(node.id) || existingItemUpdates.has(node.id))
+        if (migrated && !manifestProjectNames.has(comparableTopicTitle(legacyProject))) next.delete(comparableTopicTitle(legacyProject))
       }
       return [...next.values()]
     })
-    setNodes((current) => [...current.map((node) => existingNodeUpdates.get(node.id) || existingItemUpdates.get(node.id) || node), ...topicNodes, ...itemNodes])
+    setNodes((current) => [...current.filter((node) => !importedTopicNodeIds.has(node.id)).map((node) => existingItemUpdates.get(node.id) || node), ...itemNodes])
     setActiveProject('All focus areas')
     setScreen('plan')
     setAiImportOpen(false)
@@ -1090,7 +1071,7 @@ function PlanScreenContent({ nodes, area, onOpen, onBack, onAddFiles, onAddFolde
   const [expandedGroups, setExpandedGroups] = useState({})
   const isResearch = area?.mode === 'research'
   const groups = [...new Set(nodes.map((node) => node.project))]
-  const topicLabels = new Map(nodes.filter((node) => node.topic && node.kind?.includes('topic')).map((node) => [node.topic, node.title]))
+  const topicLabels = new Map(nodes.filter((node) => node.topic).map((node) => [node.topic, node.topicTitle || node.title]))
   return <section className="plan-screen"><div className="plan-header"><div><p className="overline">{isResearch ? 'Research library' : 'Your plan'}</p><h1>{isResearch ? 'Read broadly. Connect later.' : 'Everything has a place.'}</h1><p className="welcome-copy">{isResearch ? 'Papers are grouped by topic, not locked behind a prerequisite chain.' : 'The graph stays in the background. Your next action stays in front.'}</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBulkImport}><Icon name="layers" /> Smart import</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} {isResearch ? 'papers and research resources' : 'nodes'} · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress {isResearch ? <><span className="legend-dot locked" /> topic shelf</> : <><span className="legend-dot locked" /> locked</>}</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 24); const topicKeys = [...new Set(visibleNodes.map((node) => node.topic || '__general'))]; return <div className="plan-group" key={group}><div className="group-title"><span className={`project-dot ${isResearch ? 'blue' : 'violet'}`} />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span><button className="remove-area-button" onClick={() => onRemoveProject(group)}>remove area</button></div>{topicKeys.map((topicKey) => { const topicNodes = visibleNodes.filter((node) => (node.topic || '__general') === topicKey); const topicTitle = topicKey === '__general' ? 'General resources' : topicLabels.get(topicKey) || 'Imported topic'; return <div className="plan-topic-group" key={`${group}-${topicKey}`}><div className="plan-topic-heading"><span>{topicTitle}</span><small>{topicNodes.length} item{topicNodes.length === 1 ? '' : 's'}</small></div><div className={isResearch ? 'plan-grid research-grid' : 'plan-grid'}>{topicNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} isResearch={isResearch} onOpen={onOpen} onAddChild={onAddChild} onRemove={onRemoveNode} />)}</div></div>})}{groupNodes.length > 24 && <button className="text-button show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show less' : `Show ${groupNodes.length - 24} more`} <Icon name="arrow" /></button>}</div>})}</section>
 }
 
