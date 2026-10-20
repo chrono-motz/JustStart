@@ -431,11 +431,11 @@ function App() {
   }
 
   async function clearWorkspaceResources() {
-    if (!nodes.length) {
+    if (!nodes.length && !focusAreas.length) {
       showNotice('Your workspace is already empty.')
       return
     }
-    if (!window.confirm(`Remove all ${nodes.length} resources and topics from this workspace?`)) return
+    if (!window.confirm(`Remove all ${nodes.length} resources and ${focusAreas.length} focus areas from this workspace?`)) return
     const storagePaths = nodes.map((node) => node?.resource?.storagePath).filter(Boolean)
     setNodes([])
     setFocusAreas([])
