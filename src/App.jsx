@@ -124,11 +124,13 @@ function readStoredWorkspace() {
   }
   const workspace = loadWorkspace(getBrowserStorage(), fallback)
   const storedNodes = Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes
-  const storedProjects = Array.isArray(workspace.projects) && workspace.projects.length ? workspace.projects : fallback.projects
+  const storedProjects = Array.isArray(workspace.projects) ? workspace.projects : fallback.projects
   const researchLibrary = fallback.projects.find((project) => project.name === 'Research Library')
-  const workspaceProjects = storedProjects.some((project) => project.name === 'Research Library')
+  const workspaceProjects = Array.isArray(workspace.projects)
     ? storedProjects
-    : [...storedProjects, researchLibrary]
+    : storedProjects.some((project) => project.name === 'Research Library')
+      ? storedProjects
+      : [...storedProjects, researchLibrary]
   return {
     nodes: storedNodes.map((node) => {
       if (!node?.resource?.temporary || !/^blob:/i.test(node.resource.path ?? '')) return node
@@ -436,6 +438,7 @@ function App() {
     if (!window.confirm(`Remove all ${nodes.length} resources and topics from this workspace?`)) return
     const storagePaths = nodes.map((node) => node?.resource?.storagePath).filter(Boolean)
     setNodes([])
+    setFocusAreas([])
     setActiveProject('All focus areas')
     setScreen('start')
     if (storagePaths.length && supabaseApi && supabaseSession?.user?.id) {
@@ -1061,10 +1064,19 @@ function PathRow({ node, nodes, onClick }) {
   return <button className="path-row" onClick={onClick}><span className={node.status === 'done' ? 'row-status done' : isBlocked ? 'row-status blocked' : node.status === 'in_progress' ? 'row-status current' : 'row-status'}>{node.status === 'done' ? <Icon name="check" /> : isBlocked ? <Icon name="lock" /> : ''}</span><span className="row-title"><strong>{node.title}</strong><small>{isBlocked ? gate.blockedReasons[0] : statusLabel(node)}</small></span><span className="row-progress"><span style={{ width: `${progressValue(node)}%` }} /></span><span className="row-arrow">›</span></button>
 }
 
+function PlanScreenContent({ nodes, area, onOpen, onBack, onAddFiles, onAddFolder, onAddTopic, onAddChild, onBulkImport, onRemoveNode, onRemoveProject }) {
+  const [expandedGroups, setExpandedGroups] = useState({})
+  const isResearch = area?.mode === 'research'
+  const groups = [...new Set(nodes.map((node) => node.project))]
+  const topicLabels = new Map(nodes.filter((node) => node.topic && node.kind?.includes('topic')).map((node) => [node.topic, node.title]))
+  return <section className="plan-screen"><div className="plan-header"><div><p className="overline">{isResearch ? 'Research library' : 'Your plan'}</p><h1>{isResearch ? 'Read broadly. Connect later.' : 'Everything has a place.'}</h1><p className="welcome-copy">{isResearch ? 'Papers are grouped by topic, not locked behind a prerequisite chain.' : 'The graph stays in the background. Your next action stays in front.'}</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBulkImport}><Icon name="layers" /> Smart import</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>{nodes.length} {isResearch ? 'papers and research resources' : 'nodes'} · kept concise</span><span className="legend"><span className="legend-dot done" /> done <span className="legend-dot current" /> in progress {isResearch ? <><span className="legend-dot locked" /> topic shelf</> : <><span className="legend-dot locked" /> locked</>}</span></div>{groups.map((group) => { const groupNodes = nodes.filter((node) => node.project === group); const expanded = expandedGroups[group]; const visibleNodes = expanded ? groupNodes : groupNodes.slice(0, 24); const topicKeys = [...new Set(visibleNodes.map((node) => node.topic || '__general'))]; return <div className="plan-group" key={group}><div className="group-title"><span className={`project-dot ${isResearch ? 'blue' : 'violet'}`} />{group}<span>{groupNodes.filter((node) => node.status === 'done').length}/{groupNodes.length}</span><button className="remove-area-button" onClick={() => onRemoveProject(group)}>remove area</button></div>{topicKeys.map((topicKey) => { const topicNodes = visibleNodes.filter((node) => (node.topic || '__general') === topicKey); const topicTitle = topicKey === '__general' ? 'General resources' : topicLabels.get(topicKey) || 'Imported topic'; return <div className="plan-topic-group" key={`${group}-${topicKey}`}><div className="plan-topic-heading"><span>{topicTitle}</span><small>{topicNodes.length} item{topicNodes.length === 1 ? '' : 's'}</small></div><div className={isResearch ? 'plan-grid research-grid' : 'plan-grid'}>{topicNodes.map((node) => <PlanNode key={node.id} node={node} nodes={nodes} isResearch={isResearch} onOpen={onOpen} onAddChild={onAddChild} onRemove={onRemoveNode} />)}</div></div>})}{groupNodes.length > 24 && <button className="text-button show-more-button" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !expanded }))}>{expanded ? 'Show less' : `Show ${groupNodes.length - 24} more`} <Icon name="arrow" /></button>}</div>})}</section>
+}
+
 function PlanScreen({ nodes, area, onOpen, onBack, onAddFiles, onAddFolder, onAddTopic, onAddChild, onBulkImport, onRemoveNode, onRemoveProject }) {
   const [expandedGroups, setExpandedGroups] = useState({})
   const groups = [...new Set(nodes.map((node) => node.project))]
   const isResearch = area?.mode === 'research'
+  if (nodes.length > 0) return <PlanScreenContent nodes={nodes} area={area} onOpen={onOpen} onBack={onBack} onAddFiles={onAddFiles} onAddFolder={onAddFolder} onAddTopic={onAddTopic} onAddChild={onAddChild} onBulkImport={onBulkImport} onRemoveNode={onRemoveNode} onRemoveProject={onRemoveProject} />
   if (isResearch && nodes.length === 0) {
     return <section className="plan-screen"><div className="plan-header"><div><p className="overline">Research library</p><h1>Read broadly. Connect later.</h1><p className="welcome-copy">Papers are grouped by topic, not locked behind a prerequisite chain.</p></div><div className="plan-actions"><button className="ghost-button" onClick={onAddTopic}><Icon name="plus" /> New topic</button><button className="ghost-button" onClick={onAddFiles}><Icon name="plus" /> Add files</button><button className="ghost-button" onClick={onAddFolder}><Icon name="layers" /> Add folder</button><button className="ghost-button" onClick={onBack}>Back to start <Icon name="arrow" /></button></div></div><div className="plan-toolbar"><span>0 papers and research resources · kept concise</span><span className="legend"><span className="legend-dot locked" /> topic shelf</span></div><section className="empty-state"><div className="empty-icon">+</div><h2>Your research library is ready.</h2><p>Add papers or folders from your phone or desktop. Just Start can open files available on the device where you add them; files left only on another laptop need to be moved or added there first.</p><div className="focus-actions"><button className="primary-button" onClick={onAddFiles}><Icon name="plus" /> Add papers</button><button className="secondary-button" onClick={onAddFolder}><Icon name="layers" /> Add a folder</button></div></section></section>
   }
