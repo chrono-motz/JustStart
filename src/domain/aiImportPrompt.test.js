@@ -31,6 +31,8 @@ describe('AI intake prompt contract', () => {
     expect(prompt).toContain('Every item has a non-empty `title`, a `topicId` that names a topic')
     expect(prompt).toContain('Do not invent extra topics')
     expect(prompt).toContain('Preserve the source folder structure')
+    expect(prompt).toContain('Keep item titles specific to the resource')
+    expect(prompt).toContain('prefer\n  `Introduction`, `Lexical Analysis`, or `Parsing`')
     expect(prompt).not.toContain('plain-text folder structure')
   })
 

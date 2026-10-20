@@ -91,6 +91,11 @@ of every lecture, subtopic, file series, chapter, week, or inferred concept.
 - Preserve the source folder structure. For every file resource, use the exact
   original path relative to the supplied ZIP/folder root, with forward slashes;
   never flatten, rename, or replace a path with an inferred path.
+- Keep item titles specific to the resource rather than repeating the broad
+  topic title on every item. For example, inside `Compiler Design`, prefer
+  `Introduction`, `Lexical Analysis`, or `Parsing` over repeating
+  `Compiler Design —` before every title; the focus-area heading already gives
+  that context.
 
 ## Prerequisite inference: clear ordering evidence only
 
