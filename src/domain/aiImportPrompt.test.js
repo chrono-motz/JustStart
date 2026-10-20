@@ -34,6 +34,26 @@ describe('AI intake prompt contract', () => {
     expect(prompt).not.toContain('plain-text folder structure')
   })
 
+  it('requires evidence-backed prerequisites for clear numbered and explicit ordering', () => {
+    expect(prompt).toContain('## Prerequisite inference: clear ordering evidence only')
+    expect(prompt).toMatch(/numbered lecture or slide sequence in filenames/)
+    expect(prompt).toContain('`01-introduction.pdf`, `02-memory.pdf`, and `03-paging.pdf`')
+    expect(prompt).toContain('link each later item to the immediately preceding item')
+    expect(prompt).toContain('explicit topic or lesson ordering in filenames, titles, or available source')
+    expect(prompt).toContain('explicit prerequisite statement in the source')
+    expect(prompt).toContain('Keep these prerequisites within the one broad topic')
+  })
+
+  it('requires complete dependency objects and omits unclear relationships', () => {
+    expect(prompt).toMatch(/dependency\s+objects rather than bare parent-ID strings/)
+    expect(prompt).toContain('`id` (the existing parent item ID), `threshold`')
+    expect(prompt).toMatch(/`confidence` \(your confidence in the\s+source evidence from 0 to 1\)/)
+    expect(prompt).toMatch(/`reason` \(a concise explanation citing the\s+ordering evidence\)/)
+    expect(prompt).toContain('Do not connect items merely because they share a topic')
+    expect(prompt).toMatch(/If numbering is missing,\s+ambiguous, incomplete, contradictory/)
+    expect(prompt).toMatch(/Only add prerequisites supported by clear source\s+ordering; otherwise omit `parents`/)
+  })
+
   it.each([
     'PDFs',
     'Slide decks',

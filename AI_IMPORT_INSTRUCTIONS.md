@@ -92,6 +92,37 @@ of every lecture, subtopic, file series, chapter, week, or inferred concept.
   original path relative to the supplied ZIP/folder root, with forward slashes;
   never flatten, rename, or replace a path with an inferred path.
 
+## Prerequisite inference: clear ordering evidence only
+
+Use the source's ordering evidence to make the manifest useful, but do not
+invent a graph. Add a prerequisite when the source clearly establishes that
+one item should come before another, including:
+
+- an unambiguous numbered lecture or slide sequence in filenames, such as
+  `01-introduction.pdf`, `02-memory.pdf`, and `03-paging.pdf` in the same broad
+  subject; link each later item to the immediately preceding item when the
+  sequence is coherent;
+- explicit topic or lesson ordering in filenames, titles, or available source
+  text, such as `Part 1` before `Part 2`, `Lecture 2 requires Lecture 1`, or a
+  topic/lesson list that explicitly says what comes first; or
+- an explicit prerequisite statement in the source, such as “complete X
+  before Y.”
+
+When such evidence justifies a prerequisite, `parents` must contain dependency
+objects rather than bare parent-ID strings. Every dependency object must include
+all of these fields: `id` (the existing parent item ID), `threshold` (the
+parent's required progress from 0 to 1), `confidence` (your confidence in the
+source evidence from 0 to 1), and `reason` (a concise explanation citing the
+ordering evidence). Use `parentRule` only when the evidence supports how
+multiple prerequisites combine.
+
+Do not connect items merely because they share a topic, appear near each other,
+or contain numbers that do not establish order. If numbering is missing,
+ambiguous, incomplete, contradictory, or from unrelated broad subjects, omit
+`parents` unless another source statement clearly establishes the dependency.
+Keep these prerequisites within the one broad topic already established by the
+source; do not create subtopic topics for the sequence.
+
 ## Source handling
 
 - Apply the following rules only to files and metadata found inside the
@@ -206,13 +237,14 @@ the inputs. Follow these rules exactly:
 5. URL resources must use only `http` or `https` and must not contain a
    username, password, API key, token, or other credentials. This includes
    YouTube links.
-6. `parents`, when present, contains existing item IDs or dependency objects.
-   An object may include `id`, `threshold`, `confidence`, and `reason`.
+6. `parents`, when present, contains dependency objects for evidence-backed
+   prerequisites, not bare parent-ID strings. Each object must include an
+   existing parent item `id`, `threshold`, `confidence`, and `reason`.
    `threshold` and `confidence` use 0..1 (percent values from 0..100 are also
    accepted). `parentRule` is optional and must be `ALL` or `ANY`; the default
    is `ALL`. A parent cannot be the item itself, and prerequisite relationships
-   must not form a cycle. Only add prerequisites supported by the source
-   collection; otherwise omit `parents`.
+   must not form a cycle. Only add prerequisites supported by clear source
+   ordering; otherwise omit `parents`.
 7. `estimatedMinutes`, when present, is a positive integer. `difficulty`, when
    present, is one of `beginner`, `intermediate`, `advanced`, or `expert`.
 8. `description`, `research`, and `warnings` are optional. Warnings must be
