@@ -21,7 +21,7 @@ import {
   signInWithMagicLink,
   signOut,
 } from './domain/supabase.js'
-import { formatDueDate, initialNodes, projects } from './data/sampleData.js'
+import { formatDueDate } from './data/sampleData.js'
 import aiAgentInstructions from '../AI_IMPORT_INSTRUCTIONS.md?raw'
 
 const todayLabel = new Intl.DateTimeFormat('en-GB', {
@@ -121,27 +121,21 @@ function syncWorkspaceValue(nodes, focusAreas, activeProject, autoStart) {
 
 function readStoredWorkspace() {
   const fallback = {
-    nodes: initialNodes,
-    projects: projects.filter((project) => project.name !== 'All focus areas'),
-    activeProject: 'Compiler Design',
+    nodes: [],
+    projects: [],
+    activeProject: 'All focus areas',
     autoStart: true,
   }
   const workspace = loadWorkspace(getBrowserStorage(), fallback)
-  const storedNodes = Array.isArray(workspace.nodes) ? workspace.nodes : initialNodes
+  const storedNodes = Array.isArray(workspace.nodes) ? workspace.nodes : fallback.nodes
   const storedProjects = Array.isArray(workspace.projects) ? workspace.projects : fallback.projects
-  const researchLibrary = fallback.projects.find((project) => project.name === 'Research Library')
-  const workspaceProjects = Array.isArray(workspace.projects)
-    ? storedProjects
-    : storedProjects.some((project) => project.name === 'Research Library')
-      ? storedProjects
-      : [...storedProjects, researchLibrary]
   return {
     nodes: storedNodes.filter((node) => !isImportedTopicPlaceholder(node)).map((node) => {
       if (!node?.resource?.temporary || !/^blob:/i.test(node.resource.path ?? '')) return node
       const { path: _temporaryPath, ...resource } = node.resource
       return { ...node, resource: { ...resource, unavailable: true } }
     }),
-    projects: workspaceProjects,
+    projects: storedProjects,
     activeProject: typeof workspace.activeProject === 'string' ? workspace.activeProject : fallback.activeProject,
     autoStart: typeof workspace.autoStart === 'boolean' ? workspace.autoStart : fallback.autoStart,
   }

@@ -33,6 +33,20 @@ describe('workspace persistence', () => {
     expect(loadWorkspace(storage, { resources: [] })).toEqual(workspace)
   })
 
+  it('preserves an intentionally empty workspace instead of restoring starter data', () => {
+    const storage = createStorage()
+    const clearedWorkspace = {
+      nodes: [],
+      projects: [],
+      activeProject: 'All focus areas',
+      autoStart: true,
+    }
+
+    saveWorkspace(storage, clearedWorkspace)
+
+    expect(loadWorkspace(storage, { nodes: [{ id: 'starter' }], projects: [{ name: 'Starter' }] })).toEqual(clearedWorkspace)
+  })
+
   it('returns the fallback for malformed or unsupported persisted data', () => {
     const fallback = { resources: [], selectedId: null }
     const storage = createStorage('{not valid json')
