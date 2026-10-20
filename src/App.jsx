@@ -603,32 +603,24 @@ function App() {
       ? focusAreas.find((focusArea) => focusArea.name === activeProject)
       : null
     const inferredMode = mode || project?.mode || activeFocusArea?.mode || (manifestItems.length > 0 && manifestItems.every((item) => item.research) ? 'research' : 'study')
-    const projectName = project?.name || activeFocusArea?.name || (focusAreas.length === 1 ? focusAreas[0].name : 'Imported collection')
-    const importProject = project || activeFocusArea || focusAreas.find((focusArea) => focusArea.name === projectName) || {
-      name: projectName,
-      color: inferredMode === 'research' ? 'blue' : 'violet',
-      mode: inferredMode,
-    }
-    const projectMode = inferredMode
     const sourceFiles = new Map()
     for (const file of aiImportFiles) {
       const relative = String(file.webkitRelativePath || file.name || '').replaceAll('\\', '/')
       sourceFiles.set(relative, file)
       sourceFiles.set(relative.split('/').pop(), file)
     }
-    const existingProjectNodes = nodes.filter((node) => node.project === projectName)
-    const existingTopics = new Map()
     const existingResources = new Set()
     const existingResourceNodes = new Map()
     const existingAIItems = new Map()
-    for (const node of existingProjectNodes) {
-      if (node.title) existingTopics.set(comparableTopicTitle(node.title), node)
+    const existingTopicNodes = new Map()
+    for (const node of nodes) {
       const key = importedResourceKey(node.resource)
       if (key) {
         existingResources.add(key)
         existingResourceNodes.set(key, node)
       }
       if (node.aiItemId) existingAIItems.set(node.aiItemId, node)
+      if (node.topic && node.kind?.includes('topic')) existingTopicNodes.set(node.topic, node)
     }
 
     const newItems = []
@@ -646,19 +638,23 @@ function App() {
 
     const topicNodes = []
     const topicsById = new Map()
-    const topicsNeeded = new Set(newItems.map((item) => item.topicId))
+    const existingNodeUpdates = new Map()
+    const existingItemUpdates = new Map()
+    const topicsNeeded = new Set(aiImportManifest.manifest.items.map((item) => item.topicId))
     for (const [index, topic] of aiImportManifest.manifest.topics.entries()) {
       if (!topicsNeeded.has(topic.id)) continue
-      const existing = existingTopics.get(comparableTopicTitle(topic.title))
-      if (existing) {
-        topicsById.set(topic.id, existing)
-        continue
-      }
-      const node = {
+      const topicItems = aiImportManifest.manifest.items.filter((item) => item.topicId === topic.id)
+      const matchingFocusArea = focusAreas.find((focusArea) => comparableTopicTitle(focusArea.name) === comparableTopicTitle(topic.title))
+      const topicMode = matchingFocusArea?.mode || (topicItems.length > 0 && topicItems.every((item) => item.research) ? 'research' : inferredMode)
+      const projectName = matchingFocusArea?.name || topic.title
+      const existing = existingTopicNodes.get(topic.id) || nodes.find((node) => node.kind?.includes('topic') && comparableTopicTitle(node.title) === comparableTopicTitle(topic.title))
+      const focusArea = matchingFocusArea || { name: projectName, color: topicMode === 'research' ? 'blue' : 'violet', mode: topicMode }
+      const baseNode = existing || {
         id: `ai-topic-${topic.id}`,
         project: projectName,
-        kind: projectMode === 'research' ? 'research-topic' : 'topic',
+        kind: topicMode === 'research' ? 'research-topic' : 'topic',
         topic: topic.id,
+        aiTopicId: topic.id,
         title: topic.title,
         eyebrow: `${projectName} · AI topic ${String(index + 1).padStart(2, '0')}`,
         description: topic.description || `AI-imported topic in ${projectName}.`,
@@ -670,8 +666,10 @@ function App() {
         startability: 0.75,
         estimatedMinutes: 15,
       }
-      topicsById.set(topic.id, node)
-      topicNodes.push(node)
+      const node = { ...baseNode, project: projectName, topic: topic.id, aiTopicId: topic.id, kind: topicMode === 'research' ? 'research-topic' : 'topic' }
+      if (existing) existingNodeUpdates.set(existing.id, node)
+      else topicNodes.push(node)
+      topicsById.set(topic.id, { node, projectName, mode: topicMode, focusArea })
     }
 
     const itemIds = new Map()
@@ -686,14 +684,14 @@ function App() {
     const itemNodes = []
     for (const [index, item] of newItems.entries()) {
       const itemId = itemIds.get(item.id)
-      const topic = topicsById.get(item.topicId)
-      if (!topic) continue
+      const topicRecord = topicsById.get(item.topicId)
+      if (!topicRecord) continue
       let resource
       let sourceFile
       if (item.resource.type === 'file') {
         sourceFile = sourceFiles.get(item.resource.path) || sourceFiles.get(item.resource.path.split('/').pop())
         if (!sourceFile) continue
-        const imported = createImportedNode(sourceFile, projectName, nodes.length + index)
+        const imported = createImportedNode(sourceFile, topicRecord.projectName, nodes.length + index)
         resource = { ...imported.resource, label: item.resource.label || sourceFile.name, sourcePath: item.resource.path, source: 'ai-intake' }
       } else {
         resource = { type: 'other', label: item.resource.label || item.resource.url, url: item.resource.url, source: 'ai-intake' }
@@ -701,11 +699,11 @@ function App() {
       const node = {
         id: itemId,
         aiItemId: item.id,
-        project: projectName,
+        project: topicRecord.projectName,
         topic: item.topicId,
         title: item.title,
-        eyebrow: `${projectName} · AI item`,
-        description: item.description || `AI-imported resource under ${topic.title}.`,
+        eyebrow: `${topicRecord.projectName} · AI item`,
+        description: item.description || `AI-imported resource under ${topicRecord.node.title}.`,
         resource,
         progress: 0,
         status: 'todo',
@@ -713,7 +711,7 @@ function App() {
         difficulty: item.difficulty,
         question: 'What is the main idea I should take away from this resource?',
       }
-      if (item.parents?.length && projectMode !== 'research') {
+      if (item.parents?.length && topicRecord.mode !== 'research') {
         node.parents = item.parents.map((parent) => {
           const parentId = typeof parent === 'object' ? parent.id : parent
           if (typeof parent === 'object') return { ...parent, id: itemIds.get(parentId) || `ai-item-${parentId}` }
@@ -734,16 +732,29 @@ function App() {
       }
       itemNodes.push(node)
     }
-    if (!focusAreas.some((focusArea) => focusArea.name === projectName)) {
-      setFocusAreas((current) => [...current, { ...importProject, mode: projectMode }])
+    for (const item of aiImportManifest.manifest.items) {
+      const existing = existingAIItems.get(item.id) || existingResourceNodes.get(item.resource.type === 'url' ? `url:${item.resource.url}` : `file:${item.resource.path}`)
+      const topicRecord = topicsById.get(item.topicId)
+      if (existing && topicRecord) {
+        existingItemUpdates.set(existing.id, { ...existing, aiItemId: item.id, project: topicRecord.projectName, topic: item.topicId, eyebrow: `${topicRecord.projectName} · AI item` })
+      }
     }
-    setNodes((current) => [...current, ...topicNodes, ...itemNodes])
-    setActiveProject(projectName)
+    setFocusAreas((current) => {
+      const next = new Map(current.map((focusArea) => [comparableTopicTitle(focusArea.name), focusArea]))
+      for (const { focusArea } of topicsById.values()) next.set(comparableTopicTitle(focusArea.name), focusArea)
+      const legacyImportedNodes = nodes.filter((node) => node.project === 'Imported collection' && (node.aiItemId || node.topic || node.resource?.source === 'ai-intake'))
+      if (legacyImportedNodes.length && legacyImportedNodes.every((node) => existingNodeUpdates.has(node.id) || existingItemUpdates.has(node.id))) {
+        next.delete(comparableTopicTitle('Imported collection'))
+      }
+      return [...next.values()]
+    })
+    setNodes((current) => [...current.map((node) => existingNodeUpdates.get(node.id) || existingItemUpdates.get(node.id) || node), ...topicNodes, ...itemNodes])
+    setActiveProject('All focus areas')
     setScreen('plan')
     setAiImportOpen(false)
     setAiImportManifest(null)
     setAiImportFiles([])
-    showNotice(`Imported ${topicNodes.length} new topics and ${itemNodes.length} new resources${skippedItems ? `; skipped ${skippedItems} existing item${skippedItems === 1 ? '' : 's'}` : ''}.`)
+    showNotice(`Imported ${topicsById.size} topics and ${itemNodes.length} new resources${skippedItems ? `; routed ${skippedItems} existing item${skippedItems === 1 ? '' : 's'}` : ''}.`)
   }
 
   function handleFileInput(event) {
