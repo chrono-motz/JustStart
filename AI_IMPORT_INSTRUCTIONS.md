@@ -1,11 +1,17 @@
 # Just Start AI intake instructions
 
-Copy this entire document into a ChatGPT conversation (or another AI
-conversation) together with the files you want to import, a ZIP of the files,
-or a plain-text folder structure. The conversation may also contain problem
-links, YouTube URLs, paper citations, or a mixture of all of these. Inspect the
-inputs that are actually attached or written in the conversation; do not claim
-to have opened a file, visited a link, or read a paper that is not available.
+This document is the `AGENTS.md` input for a Just Start intake. The AI receives
+**exactly three inputs**:
+
+1. `AGENTS.md` (this instruction file).
+2. `JUSTSTART_CONTEXT.json` (the existing-workspace catalog described below).
+3. The user's source ZIP or source folder.
+
+The user uploads only those three inputs to the AI. Do not expect, request, or
+use extra chat instructions, loose files, pasted folder listings, links, paper
+citations, or other attachments. Inspect only the supplied source ZIP/folder
+and the metadata in `JUSTSTART_CONTEXT.json`; do not claim to have opened a
+file, visited a link, or read a paper that is not available in those inputs.
 
 ## Existing Just Start context (input catalog only)
 
@@ -16,35 +22,81 @@ or propose useful additions. It is context for this intake, **not the output**:
 do not overwrite it, treat it as a completed manifest, or return it in place of
 the required `manifest.json` below. The output contract remains the manifest
 described in this document, and any new items should still be supported by the
-files or links actually supplied in the conversation.
+files and metadata actually supplied in the source ZIP/folder.
 
 ## Required result: create a file
+
+The user does not upload `manifest.json` to the AI. You create it from the
+three inputs, return it as a downloadable attachment, and the user then uploads
+that `manifest.json` back to Just Start with the matching source ZIP/folder.
+Just Start handles importing later; do not import anything yourself.
 
 Your primary job is to **create a downloadable file**, not to print the JSON in
 the chat response.
 
-1. Analyze the supplied attachments, archive, folder structure, and links.
+1. Analyze the supplied `AGENTS.md`, `JUSTSTART_CONTEXT.json`, and source
+   ZIP/folder.
 2. Create a file named exactly `manifest.json` containing the completed Just
    Start manifest described below. If the chat supports a workspace or output
    folder, save it as `just-start-import/manifest.json`.
 3. Validate the file before returning: it must be valid JSON and follow every
    rule in this document.
-4. Attach the created `manifest.json` as a downloadable file in your response.
-   A short response such as `manifest.json is ready to download.` is enough.
-5. Do not paste the full JSON into the chat, do not wrap it in Markdown
-   fences, and do not replace the file with a prose summary.
+4. Return **only** the created `manifest.json` as a downloadable attachment.
+5. Do not paste any JSON into the chat, do not wrap it in Markdown fences, do
+   not replace the attachment with a prose summary, and do not return another
+   output file. The app handles importing after the user uploads the attachment
+   back to Just Start.
 
 If file creation or attachment is unavailable in the current AI conversation,
 say that a downloadable file could not be created and ask the user to enable a
 file/output tool. Do not dump the full manifest into the chat as a fallback.
 
 Your task is to prepare a small, reviewable study or research collection for
-Just Start. Group related sources into useful topics and turn each usable
-source into one item. Preserve useful source names and URLs so the person can
-match the manifest to the files selected in Just Start.
+Just Start. Group related sources into broad topics based on the user's actual
+top-level folders and subject areas, and turn each usable source into one item.
+Preserve useful source names and exact relative paths so the person can match
+the manifest to the files selected in Just Start.
+
+## Topic grouping: broad folders and subjects only
+
+The `topics` array is a set of broad user-facing buckets. It is **not** a list
+of every lecture, subtopic, file series, chapter, week, or inferred concept.
+
+- Inspect the actual top-level folders in the supplied source ZIP/folder and the
+  broad subject labels they establish. Use those folders/subjects as the
+  authoritative grouping.
+- Create **one manifest topic per broad top-level folder or broad subject**.
+  If a folder name and its contents describe the same subject, create one topic
+  for that subject rather than topics for its nested folders or filenames.
+- In the expected example, when the source contains the four broad areas
+  **Operating Systems**, **Compiler Design**, **Operations Research**, and
+  **Research Papers**, the manifest must contain exactly those four topics and
+  no topic for individual lectures or subtopics. A folder named `OS` should be
+  represented by the broad topic title `Operating Systems` when the contents
+  clearly establish that meaning.
+- Do not create topics such as `Virtual Memory`, `Parsing`, `Simplex`,
+  `Week 01`, `Lecture 05`, `Paper 1`, or a separate topic for each numbered
+  file. Those are item titles, descriptions, or source paths under their one
+  broad subject topic.
+- Assign **every eligible source item to exactly one** of the broad topics via
+  `topicId`. Do not leave an item unassigned, assign it to multiple topics, or
+  split one broad subject across filename series. A root-level item must be
+  assigned to the single broad subject supported by its path/content; do not
+  invent a miscellaneous topic merely to avoid making that decision.
+- Do not invent extra topics. Add another topic only when the source contains a
+  genuinely separate top-level folder or broad subject area that is distinct
+  from the others. Existing topics in `JUSTSTART_CONTEXT.json` may help match
+  identities, but they must not cause more granular topics than the source
+  folders/subjects require.
+- Preserve the source folder structure. For every file resource, use the exact
+  original path relative to the supplied ZIP/folder root, with forward slashes;
+  never flatten, rename, or replace a path with an inferred path.
 
 ## Source handling
 
+- Apply the following rules only to files and metadata found inside the
+  supplied source ZIP/folder. A URL mentioned in a source file may be used as a
+  URL resource; an unavailable external URL is not an additional input.
 - **PDFs:** Read the title and available text when possible. Classify each PDF
   conservatively as lecture notes, a textbook/chapter, a problem set, a paper,
   or another useful document. Keep the original relative filename in a file
@@ -70,9 +122,10 @@ match the manifest to the files selected in Just Start.
   DOI, venue, and/or `sourceUrl`). For a paper URL without an attached file,
   use the URL resource. Do not fabricate authors, dates, DOI values, venues, or
   findings; mark incomplete or inferred metadata with a warning.
-- **Uncertain classifications:** Do not guess silently. Use a broad, useful
-  topic or title, keep the original source as the resource, and add a specific
-  warning such as `Classification inferred from filename; review before use.`
+- **Uncertain classifications:** Do not guess silently. Keep the item in the
+  broad source-folder/subject topic, keep the original source as the resource,
+  and add a specific warning such as `Classification inferred from filename;
+  review before use.`
   If a source is clearly unrelated, duplicate, or only operating-system
   metadata (for example `.DS_Store`, `Thumbs.db`, or `__MACOSX` entries), omit
   it. If a source cannot be safely matched to an attached path or real URL,
@@ -171,6 +224,7 @@ the inputs. Follow these rules exactly:
    path exists in the supplied folder structure or attachments and that every
    URL is copied accurately before responding.
 
-Save the completed Just Start manifest as `manifest.json` and attach that file.
-In the chat message, provide only a short confirmation and the download. Never
-paste the full manifest into the conversation.
+Save the completed Just Start manifest as `manifest.json` and return only that
+file as a downloadable attachment. Never paste the manifest into the
+conversation; the user uploads the attachment back to Just Start, where the
+app handles importing.
