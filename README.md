@@ -1,6 +1,23 @@
 # Just Start
 
-Just Start is a local-first study and research companion that removes the blank-page moment. It turns resources into a completion-aware path and presents one useful next action when you open the app.
+> Reducing Friction by instantly starting.
+
+Just Start is a cloud-synced, AI-assisted study and research workspace. It turns a large, messy collection of notes, slides, papers, problem links, videos, and question packs into organized topics, a completion-aware learning path, and a visual dependency graph that works across laptop and phone.
+
+## Why it exists
+
+Most learning tools make people plan, classify, and upload resources before they can begin. Just Start removes that setup burden: users can import an entire collection, let their own AI prepare a structured manifest, review the result, and immediately see the next useful action.
+
+## Buildathon highlights
+
+- **Instant start:** completion-aware recommendations turn a large plan into one useful next step.
+- **Interactive graph:** dependencies become a calm, navigable map with progress-filled nodes, arrows, zoom, drag, and click-to-inspect details.
+- **AI Bulk Intake:** ChatGPT can inspect a full folder or ZIP and create a downloadable `manifest.json` instead of forcing users to add resources one by one.
+- **Incremental imports:** download `AGENTS.md` and `JUSTSTART_CONTEXT.json`; existing topics and resources are reused or skipped while only new material is added.
+- **Broad resource support:** PDFs, slides, documents, papers, question packs, problem links, YouTube links, and other files.
+- **Cloud workspace:** Supabase Auth, Postgres, and private Storage keep the same workspace available across devices.
+- **Deployable anywhere:** Vercel hosts the static frontend; the laptop does not need to stay on after deployment.
+- **Safe fallback:** local browser persistence keeps the app usable before sign-in or during a temporary cloud failure.
 
 ## Current MVP
 
@@ -21,7 +38,7 @@ Just Start is a local-first study and research companion that removes the blank-
 - Import compact JSON or Markdown question packs with optional answers and worked solutions; see `QuestionPacks/README.md`.
 - Create a Research Library focus area. Research PDFs and citation files are grouped by broad topic without prerequisite gates; filename metadata such as title, author pattern, year, and DOI is inferred locally.
 
-The browser/PWA MVP remains available, and a small Electron shell now provides native resource opening and login auto-start. The Auto-start switch controls the opening screen in the browser and also updates OS login auto-start when running in Electron. Use the **Dark mode** control in the sidebar to switch themes; the preference is stored locally. On a phone, use **Add resources** or **Add folder** for files available on that phone; the PWA cannot open files that remain only on another laptop.
+The browser/PWA is the primary experience, and a small Electron shell provides native resource opening and login auto-start. The Auto-start switch controls the opening screen in the browser and also updates OS login auto-start when running in Electron. Use the **Dark mode** control in the sidebar to switch themes; the preference is stored locally. On a phone, use **Add resources** or **Add folder** for files available on that phone; after cloud upload, the same resources can be accessed from another device.
 
 Research is intentionally a different mode from coursework: it is a shelf for broad reading and triage, not a directed learning graph. Later work can add DOI/API enrichment, duplicate detection, paper notes, reading queues, and citation links without changing the study graph semantics.
 
