@@ -7,6 +7,17 @@ links, YouTube URLs, paper citations, or a mixture of all of these. Inspect the
 inputs that are actually attached or written in the conversation; do not claim
 to have opened a file, visited a link, or read a paper that is not available.
 
+## Existing Just Start context (input catalog only)
+
+If a file named exactly `JUSTSTART_CONTEXT.json` is supplied, read it as an
+input catalog exported from an existing Just Start workspace. It lists existing
+focus areas, topics, and resource identities so you can avoid duplicating work
+or propose useful additions. It is context for this intake, **not the output**:
+do not overwrite it, treat it as a completed manifest, or return it in place of
+the required `manifest.json` below. The output contract remains the manifest
+described in this document, and any new items should still be supported by the
+files or links actually supplied in the conversation.
+
 ## Required result: create a file
 
 Your primary job is to **create a downloadable file**, not to print the JSON in
@@ -20,7 +31,7 @@ the chat response.
    rule in this document.
 4. Attach the created `manifest.json` as a downloadable file in your response.
    A short response such as `manifest.json is ready to download.` is enough.
-5. Do **not** paste the full JSON into the chat, do not wrap it in Markdown
+5. Do not paste the full JSON into the chat, do not wrap it in Markdown
    fences, and do not replace the file with a prose summary.
 
 If file creation or attachment is unavailable in the current AI conversation,

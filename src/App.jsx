@@ -12,6 +12,7 @@ import { mergeWorkspaces } from './domain/sync.js'
 import { buildGraphModel } from './domain/graph.js'
 import { normalizeAIIntakeManifest, AIIntakeValidationError } from './domain/aiIntake.js'
 import { readZipFile } from './domain/zipIntake.js'
+import { buildAIContext } from './domain/aiContext.js'
 import {
   createSupabaseApi,
   createSupabaseBrowserClient,
@@ -59,7 +60,7 @@ function resourceBadge(node) {
 }
 
 function resourceDescription(node) {
-  if (node?.resource?.type === 'pdf') return 'PDF preview'
+  if (node?.resource?.type === 'pdf') return 'PDF resource'
   return `${resourceBadge(node)} resource`
 }
 
@@ -511,6 +512,19 @@ function App() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
+  function downloadAIContext() {
+    const context = buildAIContext({ nodes, projects: focusAreas, generatedAt: new Date() })
+    const blob = new Blob([`${JSON.stringify(context, null, 2)}\n`], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'JUSTSTART_CONTEXT.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
   function addAIImportFiles(nextFiles) {
     const incoming = Array.from(nextFiles ?? [])
     if (!incoming.length) return
@@ -868,7 +882,7 @@ function App() {
           <>
             <section className="welcome-row">
               <div><p className="overline">{todayLabel}</p><h1>Good morning, Alex<span className="wave">✦</span></h1><p className="welcome-copy">You do not need to plan the whole day. Just begin with the next useful thing.</p></div>
-              <div className="welcome-actions"><button className="ghost-button" onClick={() => openImportModal()}><Icon name="plus" /> Add resources</button><button className="ghost-button" onClick={openAIImport}><Icon name="layers" /> AI bulk intake</button><button className="ghost-button secondary-ghost" onClick={() => setCatchUpOpen(true)}>Log work elsewhere</button></div>
+              <div className="welcome-actions"><button className="ghost-button" onClick={() => openImportModal()}><Icon name="plus" /> Add resources</button><button className="ghost-button" onClick={openAIImport}><Icon name="layers" /> AI bulk intake</button><button className="ghost-button" onClick={downloadAIContext}><Icon name="layers" /> Download AI context</button><button className="ghost-button secondary-ghost" onClick={() => setCatchUpOpen(true)}>Log work elsewhere</button></div>
             </section>
 
             {recommendation ? (
@@ -881,10 +895,23 @@ function App() {
                   <div className="meta-row"><span><span className="meta-icon">◷</span> {recommendation.estimatedMinutes ?? 10} min</span><span><span className="meta-icon">◌</span> {resourceDescription(recommendation)}</span><span><span className="meta-icon">↗</span> {recommendation.project}</span></div>
                   <div className="focus-actions"><button className="primary-button" onClick={() => setPreviewNode(recommendation)}>Start this <Icon name="arrow" /></button><button className="secondary-button" onClick={() => updateNode(recommendation.id, 'done')}><Icon name="check" /> Mark done</button><button className="icon-action" onClick={() => updateNode(recommendation.id, 'skip')} aria-label="Skip this item"><Icon name="skip" /></button></div>
                 </div>
-                <div className="document-preview" onClick={() => setPreviewNode(recommendation)} role="button" tabIndex="0" onKeyDown={(event) => event.key === 'Enter' && setPreviewNode(recommendation)}>
-                  <div className="preview-toolbar"><span className="preview-file"><span className="pdf-icon">{resourceBadge(recommendation)}</span> {resourceLabel(recommendation.resource)}</span><span>Ready to open</span></div>
-                  <div className="preview-page"><div className="page-kicker">{recommendation.project}</div><div className="page-title">{recommendation.title}</div><div className="page-line wide" /><div className="page-line" /><div className="page-diagram"><span /><span /><span /></div><div className="page-line" /><div className="page-line short" /></div>
-                  <div className="preview-caption"><span>Click to open a focused preview</span><Icon name="external" /></div>
+                <div
+                  className="resource-summary-card"
+                  onClick={() => setPreviewNode(recommendation)}
+                  role="button"
+                  tabIndex="0"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setPreviewNode(recommendation)
+                    }
+                  }}
+                >
+                  <div className="resource-summary-topline"><span className="resource-summary-type"><span className="resource-summary-badge">{resourceBadge(recommendation)}</span>{resourceDescription(recommendation)}</span><span className="resource-summary-ready">Ready to open</span></div>
+                  <div className="resource-summary-heading"><div><p className="resource-summary-label">Resource title</p><h3>{recommendation.title}</h3></div></div>
+                  <p className="resource-summary-file"><span>Label</span>{resourceLabel(recommendation.resource)}</p>
+                  <dl className="resource-summary-meta"><div><dt>Time</dt><dd>{recommendation.estimatedMinutes ?? 10} min</dd></div><div><dt>Project</dt><dd>{recommendation.project}</dd></div></dl>
+                  <button className="resource-summary-action" onClick={(event) => { event.stopPropagation(); setPreviewNode(recommendation) }}>Open resource <Icon name="external" /></button>
                 </div>
               </section>
             ) : (
@@ -909,7 +936,7 @@ function App() {
       {importModalOpen && <ImportModal focusAreas={focusAreas} nodes={nodes} initialDestination={importDestination} onClose={() => setImportModalOpen(false)} onChoose={chooseImportDestination} />}
       {topicModalOpen && <TopicModal focusAreas={focusAreas} nodes={nodes} activeProject={activeProject} onClose={() => setTopicModalOpen(false)} onCreate={createTopic} />}
       {authModalOpen && <SupabaseAuthModal email={authEmail} message={authMessage} busy={supabaseBusy} configured={supabaseStatus.configured} missing={supabaseStatus.missing} onClose={() => setAuthModalOpen(false)} onSubmit={requestSupabaseSignIn} />}
-      {aiImportOpen && <AIImportModal focusAreas={focusAreas} activeProject={activeProject} manifestResult={aiImportManifest} files={aiImportFiles} error={aiImportError} onClose={() => setAiImportOpen(false)} onDownloadInstructions={downloadAIInstructions} onManifestFile={handleAIManifest} onArchive={handleAIArchive} onFiles={handleAISourceFiles} onImport={importAIManifest} />}
+      {aiImportOpen && <AIImportModal focusAreas={focusAreas} activeProject={activeProject} manifestResult={aiImportManifest} files={aiImportFiles} error={aiImportError} onClose={() => setAiImportOpen(false)} onDownloadInstructions={downloadAIInstructions} onDownloadContext={downloadAIContext} onManifestFile={handleAIManifest} onArchive={handleAIArchive} onFiles={handleAISourceFiles} onImport={importAIManifest} />}
     </div>
   )
 }
@@ -1081,7 +1108,7 @@ function SupabaseAuthModal({ email, message, busy, configured, missing, onClose,
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="small-modal auth-modal" role="dialog" aria-modal="true" aria-label="Sign in to cloud sync" onSubmit={submit}><div className="modal-top"><div><span className="focus-label"><span className="pulse-dot" /> Private cloud sync</span><h2>Keep your workspace with you.</h2></div><button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button></div>{configured ? <><p className="modal-note">Sign in with a secure magic link. Your topics, progress, graph, and uploaded resources can then follow you across devices.</p><label className="select-label" htmlFor="supabase-email">Email address</label><input id="supabase-email" className="text-input" type="email" value={value} onChange={(event) => setValue(event.target.value)} placeholder="you@example.com" autoFocus required /><button className="primary-button full-button" type="submit" disabled={busy}>{busy ? 'Sending link…' : 'Email me a sign-in link'} <Icon name="arrow" /></button>{message && <p className="auth-message" role="status">{message}</p>}<p className="auth-footnote">Supabase provides the database, authentication, and private file storage. Your local workspace stays available if you sign out.</p></> : <><p className="modal-note">Cloud sync is not configured for this build yet.</p><div className="auth-config-note"><strong>Add these public settings:</strong><code>{missing.map((name) => `${name}=`).join('\n')}</code><span>Use your own Supabase project settings. Never add a service-role key to the browser.</span></div></>}</form></div>
 }
 
-function AIImportModal({ focusAreas, activeProject, manifestResult, files, error, onClose, onDownloadInstructions, onManifestFile, onArchive, onFiles, onImport }) {
+function AIImportModal({ focusAreas, activeProject, manifestResult, files, error, onClose, onDownloadInstructions, onDownloadContext, onManifestFile, onArchive, onFiles, onImport }) {
   const initialProject = activeProject !== 'All focus areas' && focusAreas.some((area) => area.name === activeProject) ? activeProject : focusAreas[0]?.name ?? ''
   const [projectChoice, setProjectChoice] = useState(initialProject)
   const [newProjectName, setNewProjectName] = useState('')
